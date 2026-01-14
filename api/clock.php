@@ -2,92 +2,116 @@
 require_once '../config/database.php';
 require_once '../utils/functions.php';
 
-$user = authenticate($pdo);
+date_default_timezone_set('Asia/Jakarta');
 
+$user = authenticate($pdo);
 $input = json_decode(file_get_contents("php://input"), true);
+
 if (!isset($input['latitude']) || !isset($input['longitude'])) {
     sendResponse(400, 'Koordinat latitude dan longitude wajib dikirim');
 }
 
 $userLat = $input['latitude'];
 $userLng = $input['longitude'];
-$today = date('Y-m-d');
-$now = date('Y-m-d H:i:s');
+$today   = date('Y-m-d');
+$now     = date('Y-m-d H:i:s');
+
 $attendanceType = isset($input['type']) ? strtoupper($input['type']) : 'KDK';
 
 if (!in_array($attendanceType, ['KDK', 'KDM'])) {
     sendResponse(400, 'Tipe absen tidak valid. Pilih KDK atau KDM.');
 }
 
+$stmt_holiday = $pdo->prepare("SELECT name FROM holidays WHERE date = ?");
+$stmt_holiday->execute([$today]);
+$holiday = $stmt_holiday->fetch(PDO::FETCH_ASSOC);
+
+if ($holiday) {
+    sendResponse(400, "Gagal Clock In! Hari ini libur: " . $holiday['name']);
+    exit;
+}
+
+// Cek Lokasi Kantor (Polygon)
 $officeStmt = $pdo->prepare("SELECT * FROM offices WHERE id = ?");
 $officeStmt->execute([$user['office_id']]);
 $office = $officeStmt->fetch();
 
 $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
 
-if ($attendanceType === 'KDK') {
-    // SKENARIO A: User bilangnya KDK (Di Kantor)
-    if (!$inArea) {
-        // TAPI GPS bilang di luar --> TOLAK!
-        sendResponse(400, "Gagal Clock In! Anda memilih 'Kerja Dari Kantor', namun lokasi Anda terdeteksi di luar area kantor.");
-    }
-} else {
-    // SKENARIO B: User bilangnya KDM (Di Mana Saja)
-    // Biasanya ini diloloskan saja, atau Anda bisa tambah aturan radius maksimal dari rumah (opsional).
-    // Untuk sekarang, kita loloskan.
+// Validasi KDK wajib di kantor
+if ($attendanceType === 'KDK' && !$inArea) {
+    sendResponse(400, "Gagal Clock In! Status 'KDK' mewajibkan Anda berada di area kantor.");
 }
+
 
 $checkStmt = $pdo->prepare("SELECT * FROM attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
 $checkStmt->execute([$user['id'], $today]);
 $attendance = $checkStmt->fetch();
 
 try {
+    // --- CLOCK IN (MASUK) ---
     if (!$attendance) {
-        $jamMasuk = "07:30:00";
+        
+        $jamBatasMasuk = "07:30:00";
+        $jamSekarang   = date('H:i:s');
 
-        $jamSekarang = date('H:i:s');
-
-        if ($jamSekarang > $jamMasuk) {
-            $statusAbsen = 'late';
+        if ($jamSekarang > $jamBatasMasuk) {
+            $statusWaktu = 'late';
         } else {
-            $statusAbsen = 'on_time';
+            $statusWaktu = 'on_time';
         }
 
-        $insertStmt = $pdo->prepare("INSERT INTO attendances (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, status, location_type) VALUES (?, ?, ?, ?, ?, ? , ?)");
+        $insertStmt = $pdo->prepare("
+            INSERT INTO attendances 
+            (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, status, location_type) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+        
         $insertStmt->execute([
             $user['id'],
             $today,
             $now,
             $userLat,
             $userLng,
-            $statusAbsen,
-            $attendanceType
+            $statusWaktu,  
+            $attendanceType  
         ]);
 
-        sendResponse(200, 'Berhasil Clock In (Masuk)', [
-            'type' => 'clock_in',
-            'time' => $now
+        sendResponse(200, 'Berhasil Clock In', [
+            'type'          => 'clock_in',
+            'time'          => $now,
+            'status'        => $statusWaktu,    
+            'location_type' => $attendanceType  
         ]);
-    } elseif ($attendance['clock_out_time'] == NULL) {
+        
+    } 
+    // --- CLOCK OUT (PULANG) ---
+    elseif ($attendance['clock_out_time'] == NULL) {
+        
+        $jamMasuk = strtotime($attendance['clock_in_time']);
+        $durasi   = time() - $jamMasuk;
 
-        $jamMasuk = strtotime($attendance['clock_in_time']); // Ubah ke timestamp
-        $jamSekarang = strtotime($now);
-        $durasiKerja = $jamSekarang - $jamMasuk;
+        if ($durasi < 60) {
+            sendResponse(400, 'Terlalu cepat! Tunggu 1 menit setelah Clock In.');
+        }
 
-        if ($durasiKerja < 60) {
-        sendResponse(400, 'Terlalu cepat! Tunggu setidaknya 1 menit setelah Clock In untuk bisa Clock Out.');
-    }
-
-        $updateStmt = $pdo->prepare("UPDATE attendances SET clock_out_time = ?, clock_out_lat = ?, clock_out_lng = ? WHERE id = ?");
+        $updateStmt = $pdo->prepare("
+            UPDATE attendances 
+            SET clock_out_time = ?, clock_out_lat = ?, clock_out_lng = ? 
+            WHERE id = ?
+        ");
         $updateStmt->execute([$now, $userLat, $userLng, $attendance['id']]);
 
-        sendResponse(200, 'Berhasil Clock Out (Pulang)', [
+        sendResponse(200, 'Berhasil Clock Out', [
             'type' => 'clock_out',
             'time' => $now
         ]);
+        
     } else {
         sendResponse(400, 'Anda sudah menyelesaikan absensi hari ini.');
     }
+
 } catch (Exception $e) {
     sendResponse(500, 'Terjadi kesalahan server: ' . $e->getMessage());
 }
+?>

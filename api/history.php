@@ -7,6 +7,8 @@ $user = authenticate($pdo);
 $month = isset($_GET['month']) ? $_GET['month'] : date('m');
 $year  = isset($_GET['year'])  ? $_GET['year']  : date('Y');
 
+$jam_batas_masuk = '07:30:00'; 
+
 try {
     $stmt = $pdo->prepare("
         SELECT 
@@ -14,7 +16,7 @@ try {
             date, 
             clock_in_time, 
             clock_out_time, 
-            status 
+            location_type as status 
         FROM attendances 
         WHERE user_id = ? 
         AND MONTH(date) = ? 
@@ -23,34 +25,39 @@ try {
     ");
     
     $stmt->execute([$user['id'], $month, $year]);
-    $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $raw_history = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $summary = [
-        'hadir' => 0,
-        'telat' => 0,
-        'tepat_waktu' => 0
+    $formatted_history = [];
+
+    $days_id = [
+        'Sunday' => 'Minggu', 'Monday' => 'Senin', 'Tuesday' => 'Selasa',
+        'Wednesday' => 'Rabu', 'Thursday' => 'Kamis', 'Friday' => 'Jumat', 'Saturday' => 'Sabtu'
     ];
 
-    foreach ($history as &$row) {
-        $row['clock_in_time']  = $row['clock_in_time']  ? date('H:i', strtotime($row['clock_in_time']))  : '-';
-        $row['clock_out_time'] = $row['clock_out_time'] ? date('H:i', strtotime($row['clock_out_time'])) : '-';
+    foreach ($raw_history as $row) {
+        $jam_masuk_raw = $row['clock_in_time'];
         
-        $summary['hadir']++;
+        $jam_masuk_display  = $jam_masuk_raw  ? date('H:i', strtotime($jam_masuk_raw))  : '-';
+        $jam_keluar_display = $row['clock_out_time'] ? date('H:i', strtotime($row['clock_out_time'])) : '-';
         
-        if ($row['status'] == 'late') {
-            $summary['telat']++;
-        } elseif ($row['status'] == 'on_time') {
-            $summary['tepat_waktu']++;
-        }
+        $day_english = date('l', strtotime($row['date']));
+        $hari_indo   = $days_id[$day_english];
+
+
+        $formatted_history[] = [
+            'id'         => $row['id'],
+            'tanggal'    => $row['date'],
+            'hari'       => $hari_indo,
+            
+            'status'     => $row['status'], 
+            'jam_masuk'  => $jam_masuk_display,
+            'jam_keluar' => $jam_keluar_display
+        ];
     }
 
     sendResponse(200, 'Data history berhasil diambil', [
-        'filter' => [
-            'month' => (int)$month,
-            'year' => (int)$year
-        ],
-        'summary' => $summary,
-        'history' => $history
+
+        'history' => $formatted_history
     ]);
 
 } catch (Exception $e) {
