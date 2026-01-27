@@ -10,14 +10,6 @@ function sendResponse($code, $message, $data = null) {
     exit();
 }
 
-function triangleArea($lat1, $lng1, $lat2, $lng2, $lat3, $lng3) {
-    return abs(
-        ($lat1 * ($lng2 - $lng3) + 
-         $lat2 * ($lng3 - $lng1) + 
-         $lat3 * ($lng1 - $lng2)) / 2.0
-    );
-}
-
 function isPointInPolygon($pointLat, $pointLng, $polygonJson) {
     $vertices = json_decode($polygonJson, true);
     
