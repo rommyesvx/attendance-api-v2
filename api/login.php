@@ -16,17 +16,22 @@ $stmt->execute([$email]);
 $user = $stmt->fetch();
 
 if ($user && password_verify($password, $user['password'])) {
-    $token = bin2hex(random_bytes(32)); 
+    $headers = ['alg' => 'HS256', 'typ' => 'JWT'];
+    $payload = [
+        'sub' => $user['id'],
+        'email' => $user['email'], 
+        'iat' => time(),           
+        'exp' => time() + (60 * 60 * 24) // Expired dalam 24 Jam
+    ];
 
-    $updateStmt = $pdo->prepare("UPDATE users SET api_token = ? WHERE id = ?");
-    $updateStmt->execute([$token, $user['id']]);
+    $jwt = generate_jwt($headers, $payload);
 
     sendResponse(200, 'Login berhasil', [
-        'token' => $token,
+        'token' => $jwt,
         'user' => [
             'id' => $user['id'],
             'name' => $user['name'],
-            'email' => $user['email']
+            'email' => $user['email'],
         ]
     ]);
 } else {

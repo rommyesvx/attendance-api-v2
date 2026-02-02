@@ -39,8 +39,10 @@ $office = $officeStmt->fetch();
 $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
 
 // Validasi KDK wajib di kantor
-if ($attendanceType === 'KDK' && !$inArea) {
-    sendResponse(400, "Gagal Clock In! Status 'KDK' mewajibkan Anda berada di area kantor.");
+if ($inArea) {
+    $attendanceType = 'KDK'; // Jika di dalam area -> KDK
+} else {
+    $attendanceType = 'KDM'; // Jika di luar area -> KDM
 }
 
 
