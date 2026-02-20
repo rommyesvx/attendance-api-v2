@@ -4,24 +4,24 @@ require_once '../utils/functions.php';
 
 $input = json_decode(file_get_contents("php://input"), true);
 
-if (!isset($input['email']) || !isset($input['password'])) {
-    sendResponse(400, 'Email dan Password wajib diisi');
+if (!isset($input['nip']) || !isset($input['password'])) {
+    sendResponse(400, 'NIP dan Password wajib diisi');
 }
 
-$email = $input['email'];
+$nip = $input['nip'];
 $password = $input['password'];
 
-$stmt = $pdo->prepare("SELECT * FROM users WHERE email = ?");
-$stmt->execute([$email]);
+$stmt = $pdo->prepare("SELECT * FROM users WHERE nip = ?");
+$stmt->execute([$nip]);
 $user = $stmt->fetch();
 
 if ($user && password_verify($password, $user['password'])) {
     $headers = ['alg' => 'HS256', 'typ' => 'JWT'];
     $payload = [
         'sub' => $user['id'],
-        'email' => $user['email'], 
+        'nip' => $user['nip'], 
         'iat' => time(),           
-        'exp' => time() + (60 * 60 * 24) // Expired dalam 24 Jam
+        'exp' => time() + (60 * 60 * 24) 
     ];
 
     $jwt = generate_jwt($headers, $payload);
@@ -31,10 +31,10 @@ if ($user && password_verify($password, $user['password'])) {
         'user' => [
             'id' => $user['id'],
             'name' => $user['name'],
-            'email' => $user['email'],
+            'nip' => $user['nip'] 
         ]
     ]);
 } else {
-    sendResponse(401, 'Email atau Password salah');
+    sendResponse(401, 'NIP atau Password salah');
 }
 ?>

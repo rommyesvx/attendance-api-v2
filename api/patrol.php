@@ -74,7 +74,7 @@ if (isset($input['image']) && !empty($input['image'])) {
     }
 
     $fileName = 'log_' . $user['id'] . '_' . time() . '.jpg';
-    $directory = '../uploads/evidence/';
+    $directory = '../evidence/';
     $filePath = $directory . $fileName;
 
     try {
@@ -84,7 +84,7 @@ if (isset($input['image']) && !empty($input['image'])) {
         
         file_put_contents($filePath, $data);
         
-        $imagePath = 'uploads/evidence/' . $fileName; 
+        $imagePath = '../evidence/' . $fileName; 
         
     } catch (Exception $e) {
         sendResponse(500, 'Gagal menyimpan gambar ke server');
