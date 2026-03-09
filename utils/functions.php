@@ -11,6 +11,40 @@ function sendResponse($code, $message, $data = null) {
     exit();
 }
 
+function pwdgenerate($awal) {
+    $awal1  = substr($awal,0,8);
+    $awal2  = substr($awal,8,8);
+    $awal3  = substr($awal,16,8);
+    $awal4  = substr($awal,24,7);
+    $awal5  = substr($awal,31,1);
+    
+    //STARTING ENCRYPT
+    $awal6 = pwdrein($awal5);
+    return $awal4.$awal2.$awal1.$awal3.$awal6;
+}
+
+function pwdrein($w) {
+    if ($w=='a'){ return '1'; } elseif ($w=='b'){ return 'z'; }
+    elseif ($w=='c'){ return '2'; } elseif ($w=='d'){ return 'f'; }
+    elseif ($w=='e'){ return '3'; } elseif ($w=='f'){ return 'x'; }
+    elseif ($w=='g'){ return 'c'; } elseif ($w=='h'){ return 'r'; }
+    elseif ($w=='i'){ return '4'; } elseif ($w=='j'){ return 's'; }
+    elseif ($w=='k'){ return 'q'; } elseif ($w=='l'){ return 'v'; }
+    elseif ($w=='m'){ return 'e'; } elseif ($w=='n'){ return '5'; }
+    elseif ($w=='o'){ return 'b'; } elseif ($w=='p'){ return '8'; }
+    elseif ($w=='q'){ return 'a'; } elseif ($w=='r'){ return '9'; }
+    elseif ($w=='s'){ return 'l'; } elseif ($w=='t'){ return '6'; }
+    elseif ($w=='u'){ return 'p'; } elseif ($w=='v'){ return 'j'; }
+    elseif ($w=='w'){ return 'u'; } elseif ($w=='x'){ return '7'; }
+    elseif ($w=='y'){ return 'w'; } elseif ($w=='z'){ return 'o'; }
+    elseif ($w=='1'){ return 'g'; } elseif ($w=='2'){ return 'h'; }
+    elseif ($w=='3'){ return 'i'; } elseif ($w=='4'){ return 'd'; }
+    elseif ($w=='5'){ return 'n'; } elseif ($w=='6'){ return 't'; }
+    elseif ($w=='7'){ return 'k'; } elseif ($w=='8'){ return 'y'; }
+    elseif ($w=='9'){ return 'm'; } elseif ($w=='0'){ return '0'; }
+    return $w;
+}
+
 function generate_jwt($headers, $payload, $secret = JWT_SECRET_KEY) {
 	$headers_encoded = rtrim(strtr(base64_encode(json_encode($headers)), '+/', '-_'), '=');
 	$payload_encoded = rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
