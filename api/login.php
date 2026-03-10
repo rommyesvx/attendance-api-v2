@@ -23,7 +23,7 @@ $password_acak = pwdgenerate($md5_input);
 if ($user && $password_acak === $user['user_password']) {
     $headers = ['alg' => 'HS256', 'typ' => 'JWT'];
     $payload = [
-        'sub' => $user['id'],
+        'sub' => $user['user_id'],
         'user_id' => $user['user_id'], 
         'iat' => time(),           
         'exp' => time() + (60 * 60 * 24) 
