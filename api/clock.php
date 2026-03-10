@@ -47,7 +47,7 @@ if ($inArea) {
 
 
 $checkStmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
-$checkStmt->execute([$user['id'], $today]);
+$checkStmt->execute([$user['user_id'], $today]);
 $attendance = $checkStmt->fetch();
 
 try {
@@ -70,7 +70,7 @@ try {
         ");
         
         $insertStmt->execute([
-            $user['id'],
+            $user['user_id'],
             $today,
             $now,
             $userLat,
