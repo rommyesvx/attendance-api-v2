@@ -126,7 +126,7 @@ function authenticate($pdo) {
 
     $userId = $payload['sub'];
 
-    $stmt = $pdo->prepare("SELECT * FROM user WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT * FROM user WHERE user_id = ?");
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
 
