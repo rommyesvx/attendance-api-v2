@@ -8,21 +8,20 @@ $user = authenticate($pdo);
 try {
     $stmt = $pdo->prepare("
         SELECT 
-            users.id, 
-            users.name, 
-            users.email,
-            users.nip,
-            users.alamat,
-            users.tempat_lahir,
-            users.tanggal_lahir,
-            users.jabatan, 
-            offices.name as office_name 
-        FROM users 
-        LEFT JOIN offices ON users.office_id = offices.id 
-        WHERE users.id = ?
+            user.user_id, 
+            user.user_name, 
+            user.user_email,
+            user.user_nip,
+            user.user_alamat,
+            user.user_birthday,
+            user.user_type, 
+            absensi_offices.name as office_name 
+        FROM user 
+        LEFT JOIN absensi_offices ON user.office_id = absensi_offices.id 
+        WHERE user.id = ?
     ");
     
-    $stmt->execute([$user['id']]);
+    $stmt->execute([$user['user_id']]);
     $profile = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($profile) {

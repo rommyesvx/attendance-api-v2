@@ -9,7 +9,7 @@ $year  = isset($_GET['year'])  ? $_GET['year']  : date('Y');
 try {
     $stmt = $pdo->prepare("
         SELECT date, name, type 
-        FROM holidays 
+        FROM absensi_holidays 
         WHERE MONTH(date) = ? AND YEAR(date) = ?
         ORDER BY date ASC
     ");

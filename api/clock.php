@@ -22,7 +22,7 @@ if (!in_array($attendanceType, ['KDK', 'KDM'])) {
     sendResponse(400, 'Tipe absen tidak valid. Pilih KDK atau KDM.');
 }
 
-$stmt_holiday = $pdo->prepare("SELECT name FROM holidays WHERE date = ?");
+$stmt_holiday = $pdo->prepare("SELECT name FROM absensi_holidays WHERE date = ?");
 $stmt_holiday->execute([$today]);
 $holiday = $stmt_holiday->fetch(PDO::FETCH_ASSOC);
 
@@ -32,7 +32,7 @@ if ($holiday) {
 }
 
 // Cek Lokasi Kantor (Polygon)
-$officeStmt = $pdo->prepare("SELECT * FROM offices WHERE id = ?");
+$officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
 $officeStmt->execute([$user['office_id']]);
 $office = $officeStmt->fetch();
 
@@ -46,7 +46,7 @@ if ($inArea) {
 }
 
 
-$checkStmt = $pdo->prepare("SELECT * FROM attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
+$checkStmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
 $checkStmt->execute([$user['id'], $today]);
 $attendance = $checkStmt->fetch();
 
@@ -64,7 +64,7 @@ try {
         }
 
         $insertStmt = $pdo->prepare("
-            INSERT INTO attendances 
+            INSERT INTO absensi_attendances 
             (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, status, location_type) 
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ");
@@ -98,7 +98,7 @@ try {
         }
 
         $updateStmt = $pdo->prepare("
-            UPDATE attendances 
+            UPDATE absensi_attendances 
             SET clock_out_time = ?, clock_out_lat = ?, clock_out_lng = ? 
             WHERE id = ?
         ");

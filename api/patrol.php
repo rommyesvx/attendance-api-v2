@@ -16,11 +16,11 @@ $userLng = $input['longitude'];
 $today   = date('Y-m-d');
 $now     = date('Y-m-d H:i:s');
 
-if ($user['role'] !== 'security') {
+if ($user['user_jabatan'] !== 'Petugas Keamanan') {
     sendResponse(403, 'Fitur ini hanya untuk Security');
 }
 
-$officeStmt = $pdo->prepare("SELECT polygon_coordinates FROM offices WHERE id = ?");
+$officeStmt = $pdo->prepare("SELECT polygon_coordinates FROM absensi_offices WHERE id = ?");
 $officeStmt->execute([$user['office_id']]);
 $office = $officeStmt->fetch();
 
@@ -29,7 +29,7 @@ if (!isPointInPolygon($userLat, $userLng, $office['polygon_coordinates'])) {
     sendResponse(400, "Gagal Lapor! Posisi Anda di luar area patroli.");
 }
 
-$attStmt = $pdo->prepare("SELECT id, clock_out_time FROM attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
+$attStmt = $pdo->prepare("SELECT id, clock_out_time FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
 $attStmt->execute([$user['id'], $today]);
 $attendance = $attStmt->fetch();
 
@@ -41,7 +41,7 @@ if ($attendance['clock_out_time'] != NULL) {
     sendResponse(400, 'Anda sudah Clock Out (Pulang). Tidak bisa patroli.');
 }
 
-$logStmt = $pdo->prepare("SELECT created_at FROM security_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1");
+$logStmt = $pdo->prepare("SELECT created_at FROM absensi_security_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1");
 $logStmt->execute([$user['id']]);
 $lastLog = $logStmt->fetch();
 
@@ -93,7 +93,7 @@ if (isset($input['image']) && !empty($input['image'])) {
 
 try {
     $insertStmt = $pdo->prepare("
-        INSERT INTO security_logs (user_id, attendance_id, created_at, latitude, longitude, note, image_path) 
+        INSERT INTO absensi_security_logs (user_id, attendance_id, created_at, latitude, longitude, note, image_path) 
         VALUES (?, ?, ?, ?, ?, ?, ?)
     ");
 
@@ -111,7 +111,7 @@ try {
 
     sendResponse(200, 'Laporan Patroli Berhasil Disimpan', [
         'time' => $now,
-        'image_url' => $imagePath ? "http://10.30.13.24:8000/" . $imagePath : null
+        'image_url' => $imagePath ? "https://caraka-biroumumpbj.kemendikdasmen.go.id/" . $imagePath : null
     ]);
 
 } catch (Exception $e) {

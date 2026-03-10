@@ -17,7 +17,7 @@ try {
             clock_in_time, 
             clock_out_time, 
             location_type as status 
-        FROM attendances 
+        FROM absensi_attendances 
         WHERE user_id = ? 
         AND MONTH(date) = ? 
         AND YEAR(date) = ? 
