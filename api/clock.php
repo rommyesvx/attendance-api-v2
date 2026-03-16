@@ -52,7 +52,7 @@ $attendance = $checkStmt->fetch();
 
 try {
     // --- CLOCK IN (MASUK) ---
-    if (!$attendance) {
+    if (!$attendance || $attendance['clock_out_time'] != NULL) {
         
         $jamBatasMasuk = "07:30:00";
         $jamSekarang   = date('H:i:s');
@@ -88,7 +88,7 @@ try {
         
     } 
     // --- CLOCK OUT (PULANG) ---
-    elseif ($attendance['clock_out_time'] == NULL) {
+    else {
         
         $jamMasuk = strtotime($attendance['clock_in_time']);
         $durasi   = time() - $jamMasuk;
@@ -109,8 +109,6 @@ try {
             'time' => $now
         ]);
         
-    } else {
-        sendResponse(400, 'Anda sudah menyelesaikan absensi hari ini.');
     }
 
 } catch (Exception $e) {
