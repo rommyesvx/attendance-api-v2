@@ -21,7 +21,7 @@ try {
         WHERE user_id = ? 
         AND MONTH(date) = ? 
         AND YEAR(date) = ? 
-        ORDER BY date DESC
+        ORDER BY date DESC, id DESC
     ");
     
     $stmt->execute([$user['user_id'], $month, $year]);
