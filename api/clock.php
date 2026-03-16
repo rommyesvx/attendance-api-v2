@@ -54,14 +54,7 @@ try {
     // --- CLOCK IN (MASUK) ---
     if (!$attendance || $attendance['clock_out_time'] != NULL) {
         
-        $jamBatasMasuk = "07:30:00";
-        $jamSekarang   = date('H:i:s');
-
-        if ($jamSekarang > $jamBatasMasuk) {
-            $statusWaktu = 'late';
-        } else {
-            $statusWaktu = 'on_time';
-        }
+        $statusWaktu = 'on_time'; // Semua absen dianggap on time
 
         $insertStmt = $pdo->prepare("
             INSERT INTO absensi_attendances 
