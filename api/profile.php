@@ -18,7 +18,7 @@ try {
             absensi_offices.name as office_name 
         FROM user 
         LEFT JOIN absensi_offices ON user.office_id = absensi_offices.id 
-        WHERE user.id = ?
+        WHERE user.user_id = ?
     ");
     
     $stmt->execute([$user['user_id']]);

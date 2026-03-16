@@ -15,9 +15,42 @@ $userLat = $input['latitude'];
 $userLng = $input['longitude'];
 $today   = date('Y-m-d');
 $now     = date('Y-m-d H:i:s');
+$currentTime = date('H:i:s');
 
 if ($user['user_jabatan'] !== 'Petugas Keamanan') {
     sendResponse(403, 'Fitur ini hanya untuk Security');
+}
+
+$shiftStmt = $pdo->prepare("
+    SELECT jam_masuk, jam_pulang 
+    FROM absensi_pegawai_patroli 
+    WHERE user_id = ? AND tanggal_shift = ?
+");
+$shiftStmt->execute([$user['user_id'], $today]);
+$shiftsHariIni = $shiftStmt->fetchAll(PDO::FETCH_ASSOC);
+
+if (!$shiftsHariIni) {
+    sendResponse(400, 'Anda tidak memiliki jadwal shift patroli pada hari ini.');
+}
+
+$isWithinShift = false;
+
+foreach ($shiftsHariIni as $shift) {
+    $jamMasuk  = $shift['jam_masuk'];
+    $jamPulang = $shift['jam_pulang'];
+
+    // Toleransi 30 menit sebelum dan sesudah shift agar absen tidak gagal karena beda menit
+    $batasBuka  = date('H:i:s', strtotime($jamMasuk . ' -30 minutes'));
+    $batasTutup = date('H:i:s', strtotime($jamPulang . ' +30 minutes'));
+
+    if ($currentTime >= $batasBuka && $currentTime <= $batasTutup) {
+        $isWithinShift = true;
+        break; 
+    }
+}
+
+if (!$isWithinShift) {
+    sendResponse(400, "Gagal Lapor! Saat ini Anda berada di luar jam shift patroli Anda.");
 }
 
 $officeStmt = $pdo->prepare("SELECT polygon_coordinates FROM absensi_offices WHERE id = ?");
@@ -30,7 +63,7 @@ if (!isPointInPolygon($userLat, $userLng, $office['polygon_coordinates'])) {
 }
 
 $attStmt = $pdo->prepare("SELECT id, clock_out_time FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
-$attStmt->execute([$user['id'], $today]);
+$attStmt->execute([$user['user_id'], $today]);
 $attendance = $attStmt->fetch();
 
 if (!$attendance) {
@@ -42,7 +75,7 @@ if ($attendance['clock_out_time'] != NULL) {
 }
 
 $logStmt = $pdo->prepare("SELECT created_at FROM absensi_security_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1");
-$logStmt->execute([$user['id']]);
+$logStmt->execute([$user['user_id']]);
 $lastLog = $logStmt->fetch();
 
 if ($lastLog) {
@@ -73,7 +106,7 @@ if (isset($input['image']) && !empty($input['image'])) {
         sendResponse(400, 'Format gambar tidak valid');
     }
 
-    $fileName = 'log_' . $user['id'] . '_' . time() . '.jpg';
+    $fileName = 'log_' . $user['user_id'] . '_' . time() . '.jpg';
     $directory = '../evidence/';
     $filePath = $directory . $fileName;
 
@@ -84,7 +117,7 @@ if (isset($input['image']) && !empty($input['image'])) {
         
         file_put_contents($filePath, $data);
         
-        $imagePath = '../evidence/' . $fileName; 
+        $imagePath = '/evidence/' . $fileName; 
         
     } catch (Exception $e) {
         sendResponse(500, 'Gagal menyimpan gambar ke server');
@@ -100,7 +133,7 @@ try {
     $note = isset($input['note']) ? $input['note'] : 'Patroli Rutin';
 
     $insertStmt->execute([
-        $user['id'],
+        $user['user_id'],
         $attendance['id'],
         $now,
         $userLat,
@@ -111,7 +144,7 @@ try {
 
     sendResponse(200, 'Laporan Patroli Berhasil Disimpan', [
         'time' => $now,
-        'image_url' => $imagePath ? "https://caraka-biroumumpbj.kemendikdasmen.go.id/" . $imagePath : null
+        'image_url' => $imagePath ? "https://caraka-biroumumpbj.kemendikdasmen.go.id" . $imagePath : null
     ]);
 
 } catch (Exception $e) {

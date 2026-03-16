@@ -24,7 +24,7 @@ try {
         ORDER BY date DESC
     ");
     
-    $stmt->execute([$user['id'], $month, $year]);
+    $stmt->execute([$user['user_id'], $month, $year]);
     $raw_history = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $formatted_history = [];
