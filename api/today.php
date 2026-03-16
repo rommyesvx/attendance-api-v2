@@ -6,25 +6,37 @@ $user = authenticate($pdo);
 $today = date('Y-m-d');
 
 try {
-    $stmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
+    $stmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id ASC");
     $stmt->execute([$user['user_id'], $today]);
-    $attendance = $stmt->fetch(PDO::FETCH_ASSOC);
+    $attendances = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $statusAbsen = 'not_clocked_in';
     $jamMasuk = null;
     $jamPulang = null;
     $latestTime = null;
 
-    if ($attendance) {
-        if ($attendance['clock_out_time'] == NULL) {
+    if (count($attendances) > 0) {
+        $first = $attendances[0];
+        $last = $attendances[count($attendances) - 1];
+
+        $jamMasuk = $first['clock_in_time'];
+        
+        $maxPulang = null;
+        foreach ($attendances as $att) {
+            if ($att['clock_out_time'] != null) {
+                if ($maxPulang == null || strtotime($att['clock_out_time']) > strtotime($maxPulang)) {
+                    $maxPulang = $att['clock_out_time'];
+                }
+            }
+        }
+        $jamPulang = $maxPulang;
+
+        if ($last['clock_out_time'] == NULL) {
             $statusAbsen = 'clocked_in';
-            $jamMasuk = $attendance['clock_in_time'];
-            $latestTime = $jamMasuk;
+            $latestTime = $last['clock_in_time'];
         } else {
             $statusAbsen = 'checked_out';
-            $jamMasuk = $attendance['clock_in_time'];
-            $jamPulang = $attendance['clock_out_time'];
-            $latestTime = $jamPulang;
+            $latestTime = $last['clock_out_time'];
         }
     }
 
