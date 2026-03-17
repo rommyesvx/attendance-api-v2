@@ -9,8 +9,8 @@ if (!isset($input['user_id']) || !isset($input['user_password'])) {
     sendResponse(400, 'User ID dan Password wajib diisi');
 }
 
-$user_id = $input['user_id'];
-$user_password = $input['user_password'];
+$user_id = trim($input['user_id']);
+$user_password = trim($input['user_password']);
 
 $stmt = $pdo->prepare("SELECT * FROM user WHERE user_id = ?");
 $stmt->execute([$user_id]);
@@ -20,7 +20,7 @@ $md5_input = md5($user_password);
 
 $password_acak = pwdgenerate($md5_input);
 
-if ($user && $password_acak === $user['user_password']) {
+if ($user && $password_acak === trim($user['user_password'])) {
     $headers = ['alg' => 'HS256', 'typ' => 'JWT'];
     $payload = [
         'sub' => $user['user_id'],
