@@ -11,10 +11,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     exit();
 }
 
-$host = 'localhost';
-$db   = 'attendance-api-v2'; 
-$user = 'root';       
-$pass = '';           
+$host = '172.16.16.46';
+$db   = 'dbintranet'; 
+$user = 'admin_app';       
+$pass = 'Admin#2026';           
 $charset = 'utf8mb4';
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
