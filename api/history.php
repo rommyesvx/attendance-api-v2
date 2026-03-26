@@ -12,17 +12,16 @@ $jam_batas_masuk = '07:30:00';
 try {
     $stmt = $pdo->prepare("
         SELECT 
-            MAX(a.id) as id, 
+            a.id, 
             a.date, 
-            MIN(a.clock_in_time) as clock_in_time, 
-            MAX(a.clock_out_time) as clock_out_time, 
-            (SELECT location_type FROM absensi_attendances WHERE id = MAX(a.id)) as status 
+            a.clock_in_time, 
+            a.clock_out_time, 
+            a.location_type as status
         FROM absensi_attendances a
         WHERE a.user_id = ? 
         AND MONTH(a.date) = ? 
         AND YEAR(a.date) = ? 
-        GROUP BY a.date
-        ORDER BY a.date DESC
+        ORDER BY a.date DESC, a.clock_in_time DESC
     ");
     
     $stmt->execute([$user['user_id'], $month, $year]);
