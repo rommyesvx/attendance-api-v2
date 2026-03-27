@@ -11,11 +11,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
     exit();
 }
 
-$host = '172.16.16.46';
-$db   = 'dbintranet'; 
-$user = 'admin_app';       
-$pass = 'Admin#2026';           
-$charset = 'utf8mb4';
+$env = parse_ini_file(__DIR__ . '/../.env');
+
+$host = $env['DB_HOST'];
+$db   = $env['DB_NAME']; 
+$user = $env['DB_USER'];       
+$pass = $env['DB_PASS'];           
+$charset = $env['DB_CHARSET'];
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
 $options = [

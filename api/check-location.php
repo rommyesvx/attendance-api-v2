@@ -14,7 +14,6 @@ if (!isset($input['latitude']) || !isset($input['longitude'])) {
 $userLat = $input['latitude'];
 $userLng = $input['longitude'];
 $today   = date('Y-m-d');
-$now     = date('Y-m-d H:i:s');
 
 $stmt_holiday = $pdo->prepare("SELECT name FROM absensi_holidays WHERE date = ?");
 $stmt_holiday->execute([$today]);
@@ -34,7 +33,6 @@ $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
 
 // Evaluasi status lokasi
 $attendanceType = $inArea ? 'KDK' : 'KDM';
-$isConfirmed = $inArea ? 1 : 0;
 
 $checkStmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
 $checkStmt->execute([$user['user_id'], $today]);
@@ -43,42 +41,15 @@ $attendance = $checkStmt->fetch();
 try {
     // Pastikan user belum absen masuk hari ini (atau kalau diperlukan, izinkan multi shift)
     if (!$attendance || $attendance['clock_out_time'] != NULL) {
-        
-        $statusWaktu = 'on_time';
-
-        $insertStmt = $pdo->prepare("
-            INSERT INTO absensi_attendances 
-            (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, status, location_type, is_confirmed) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        
-        $insertStmt->execute([
-            $user['user_id'],
-            $today,
-            $now,
-            $userLat,
-            $userLng,
-            $statusWaktu,  
-            $attendanceType,
-            $isConfirmed
-        ]);
-
-        $attendanceId = $pdo->lastInsertId(); // Dapatkan ID untuk Endpoint 2
-
         if ($attendanceType === 'KDK') {
-            sendResponse(200, 'Absen berhasil', [
+            sendResponse(200, 'Lokasi valid (KDK)', [
                 'status' => 'success',
-                'location' => 'KDK',
-                'is_confirmed' => true,
-                'attendance_id' => $attendanceId // Optional, tapi baik disertakan
+                'location' => 'KDK'
             ]);
         } else {
-            // Jika branch KDM dipilih
-            sendResponse(202, 'KDM terdeteksi, butuh konfirmasi', [
+            sendResponse(202, 'Lokasi diluar area (KDM)', [
                 'status' => 'pending_confirmation',
-                'location' => 'KDM',
-                'is_confirmed' => false,
-                'attendance_id' => $attendanceId // Dibutuhkan oleh Front-end untuk Pop-up KDM
+                'location' => 'KDM'
             ]);
         }
     } else {

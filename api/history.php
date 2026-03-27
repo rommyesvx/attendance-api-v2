@@ -2,6 +2,7 @@
 require_once '../config/database.php';
 require_once '../utils/functions.php';
 
+date_default_timezone_set('Asia/Jakarta');
 $user = authenticate($pdo);
 
 $month = isset($_GET['month']) ? $_GET['month'] : date('m');
