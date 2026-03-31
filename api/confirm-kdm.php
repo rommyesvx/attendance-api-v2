@@ -14,13 +14,11 @@ if (!isset($input['attendance_id']) || !isset($input['confirmation_status'])) {
 $attendanceId = $input['attendance_id'];
 $confirmationStatus = $input['confirmation_status'];
 
-// Validasi status konfirmasi harus bernilai true
 if ($confirmationStatus !== true) {
     sendResponse(400, 'Status konfirmasi tidak valid, harus bernilai true');
 }
 
 try {
-    // Cari data absensi KDM yang butuh konfirmasi
     $checkStmt = $pdo->prepare("SELECT id FROM absensi_attendances WHERE id = ? AND user_id = ? AND is_confirmed = 0");
     $checkStmt->execute([$attendanceId, $user['user_id']]);
     $attendance = $checkStmt->fetch();
@@ -29,7 +27,6 @@ try {
         sendResponse(404, 'Data absensi tidak ditemukan atau sudah dikonfirmasi sebelumnya');
     }
 
-    // Update row, set is_confirmed = true
     $updateStmt = $pdo->prepare("UPDATE absensi_attendances SET is_confirmed = 1 WHERE id = ?");
     $updateStmt->execute([$attendanceId]);
 

@@ -21,7 +21,6 @@ if ($user['user_jabatan'] !== 'Petugas Keamanan') {
     sendResponse(403, 'Fitur ini hanya untuk Security');
 }
 
-<<<<<<< HEAD
 $shiftStmt = $pdo->prepare("
     SELECT jam_masuk, jam_pulang 
     FROM absensi_pegawai_patroli 
@@ -54,34 +53,6 @@ if (!$isWithinShift) {
     sendResponse(400, "Gagal Lapor! Saat ini Anda berada di luar jam shift patroli Anda.");
 }
 
-=======
-
-$shiftStmt = $pdo->prepare("SELECT shift_start, shift_end FROM security_guards WHERE user_id = ?");
-$shiftStmt->execute([$user['id']]); 
-$shift = $shiftStmt->fetch(PDO::FETCH_ASSOC);
-
-if (!$shift) {
-    sendResponse(400, 'Jadwal shift Anda belum terdaftar di sistem.');
-}
-
-$shiftStart = $shift['shift_start'];
-$shiftEnd   = $shift['shift_end'];
-$isWithinShift = false;
-
-if ($shiftStart <= $shiftEnd) {
-    $isWithinShift = ($currentTime >= $shiftStart && $currentTime <= $shiftEnd);
-} else {
-    $isWithinShift = ($currentTime >= $shiftStart || $currentTime <= $shiftEnd);
-}
-
-if (!$isWithinShift) {
-    $tampilStart = date('H:i', strtotime($shiftStart));
-    $tampilEnd   = date('H:i', strtotime($shiftEnd));
-    sendResponse(400, "Gagal Lapor! Saat ini di luar jadwal shift Anda ($tampilStart s/d $tampilEnd).");
-}
-
-
->>>>>>> 94dfb36aad6e5c44623dd769aed5b78540497ba0
 $officeStmt = $pdo->prepare("SELECT polygon_coordinates FROM absensi_offices WHERE id = ?");
 $officeStmt->execute([$user['office_id']]);
 $office = $officeStmt->fetch();

@@ -24,14 +24,12 @@ if ($holiday) {
     exit;
 }
 
-// Cek Lokasi Kantor (Polygon)
 $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
 $officeStmt->execute([$user['office_id']]);
 $office = $officeStmt->fetch();
 
 $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
 
-// Evaluasi status lokasi
 $attendanceType = $inArea ? 'KDK' : 'KDM';
 
 $checkStmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
@@ -39,7 +37,6 @@ $checkStmt->execute([$user['user_id'], $today]);
 $attendance = $checkStmt->fetch();
 
 try {
-    // Pastikan user belum absen masuk hari ini (atau kalau diperlukan, izinkan multi shift)
     if (!$attendance || $attendance['clock_out_time'] != NULL) {
         if ($attendanceType === 'KDK') {
             sendResponse(200, 'Lokasi valid (KDK)', [
@@ -53,7 +50,6 @@ try {
             ]);
         }
     } else {
-        // Jika sudah absen tapi belum clock out
         sendResponse(400, 'Anda masih memiliki sesi absen aktif. Silakan Clock Out terlebih dahulu sebelum memulai absen baru.');
     }
 

@@ -17,7 +17,6 @@ $today   = date('Y-m-d');
 $now     = date('Y-m-d H:i:s');
 
 try {
-    // Cari data absen masuk hari ini berdasarkan user_id dan date
     $checkStmt = $pdo->prepare("SELECT id, clock_in_time, clock_out_time FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
     $checkStmt->execute([$user['user_id'], $today]);
     $attendance = $checkStmt->fetch();
@@ -26,7 +25,6 @@ try {
         sendResponse(404, 'Data Absen Masuk hari ini tidak ditemukan. Silakan Clock In terlebih dahulu.');
     }
 
-    // Periksa apakah sudah melakukan Clock Out sebelumnya
     if ($attendance['clock_out_time'] !== NULL) {
         sendResponse(400, 'Sesi absen ini sudah diakhiri. Silakan Clock In kembali jika ingin absensi baru.');
     }
@@ -34,12 +32,10 @@ try {
     $jamMasuk = strtotime($attendance['clock_in_time']);
     $durasi   = time() - $jamMasuk;
 
-    // Validasi minimum waktu sebelum bisa absen pulang (contoh: 60 detik)
     if ($durasi < 60) {
         sendResponse(400, 'Terlalu cepat! Tunggu minimal 1 menit setelah Clock In untuk bisa Absen Pulang.');
     }
 
-    // Lakukan Update data Clock Out
     $updateStmt = $pdo->prepare("
         UPDATE absensi_attendances 
         SET clock_out_time = ?, clock_out_lat = ?, clock_out_lng = ? 
