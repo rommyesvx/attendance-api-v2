@@ -14,6 +14,7 @@ if (!isset($input['latitude']) || !isset($input['longitude'])) {
 $userLat = $input['latitude'];
 $userLng = $input['longitude'];
 $today   = date('Y-m-d');
+$currentTime = date('Y-m-d H:i:s');
 
 $stmt_holiday = $pdo->prepare("SELECT name FROM absensi_holidays WHERE date = ?");
 $stmt_holiday->execute([$today]);
@@ -24,13 +25,20 @@ if ($holiday) {
     exit;
 }
 
-$officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
-$officeStmt->execute([$user['office_id']]);
-$office = $officeStmt->fetch();
+if (empty($user['office_id'])) {
+    $attendanceType = 'KDM';
+} else {
+    $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
+    $officeStmt->execute([$user['office_id']]);
+    $office = $officeStmt->fetch();
 
-$inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
-
-$attendanceType = $inArea ? 'KDK' : 'KDM';
+    if ($office && !empty($office['polygon_coordinates'])) {
+        $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
+        $attendanceType = $inArea ? 'KDK' : 'KDM';
+    } else {
+        $attendanceType = 'KDM';
+    }
+}
 
 $checkStmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
 $checkStmt->execute([$user['user_id'], $today]);
@@ -38,17 +46,42 @@ $attendance = $checkStmt->fetch();
 
 try {
     if (!$attendance || $attendance['clock_out_time'] != NULL) {
-        if ($attendanceType === 'KDK') {
-            sendResponse(200, 'Lokasi valid (KDK)', [
+        
+        $isConfirmed = ($attendanceType === 'KDM') ? 0 : 1;
+
+        $insertStmt = $pdo->prepare("
+            INSERT INTO absensi_attendances 
+            (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, location_type, is_confirmed) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+        $insertStmt->execute([
+            $user['user_id'], 
+            $today, 
+            $currentTime, 
+            $userLat, 
+            $userLng, 
+            $attendanceType, 
+            $isConfirmed
+        ]);
+
+        $newAttendanceId = $pdo->lastInsertId();
+
+        if ($attendanceType === 'KDK' || $attendanceType === 'WFA') {
+            sendResponse(200, "Clock In berhasil ({$attendanceType})", [
                 'status' => 'success',
-                'location' => 'KDK'
+                'location' => $attendanceType,
+                'attendance_id' => $newAttendanceId,
+                'is_confirmed' => true
             ]);
         } else {
-            sendResponse(202, 'Lokasi diluar area (KDM)', [
+            sendResponse(202, 'Lokasi diluar area (KDM). Menunggu konfirmasi.', [
                 'status' => 'pending_confirmation',
-                'location' => 'KDM'
+                'location' => 'KDM',
+                'attendance_id' => $newAttendanceId,
+                'is_confirmed' => false
             ]);
         }
+        
     } else {
         sendResponse(400, 'Anda masih memiliki sesi absen aktif. Silakan Clock Out terlebih dahulu sebelum memulai absen baru.');
     }
