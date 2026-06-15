@@ -33,7 +33,7 @@ try {
     $durasi   = time() - $jamMasuk;
 
     if ($durasi < 60) {
-        sendResponse(400, 'Terlalu cepat! Tunggu minimal 1 menit setelah Clock In untuk bisa Absen Pulang.');
+        sendResponse(400, 'Tunggu minimal 1 menit setelah Clock In untuk bisa Absen Pulang.');
     }
 
     $updateStmt = $pdo->prepare("
