@@ -45,45 +45,68 @@ $checkStmt->execute([$user['user_id'], $today]);
 $attendance = $checkStmt->fetch();
 
 try {
-    if (!$attendance || $attendance['clock_out_time'] != NULL) {
-        
-        $isConfirmed = ($attendanceType === 'KDM') ? 0 : 1;
+      // Attendance already exists = Clock Out
+    if ($attendance) {
 
-        $insertStmt = $pdo->prepare("
-            INSERT INTO absensi_attendances 
-            (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, location_type, is_confirmed) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+        $updateStmt = $pdo->prepare("
+            UPDATE absensi_attendances
+            SET
+                clock_out_time = ?,
+                clock_out_lat = ?,
+                clock_out_lng = ?,
+				status = ?
+            WHERE id = ?
         ");
-        $insertStmt->execute([
-            $user['user_id'], 
-            $today, 
-            $currentTime, 
-            $userLat, 
-            $userLng, 
-            $attendanceType, 
-            $isConfirmed
+
+        $updateStmt->execute([
+            $currentTime,
+            $userLat,
+            $userLng,
+			'Late',
+            $attendance['id']
         ]);
 
-        $newAttendanceId = $pdo->lastInsertId();
+        sendResponse(200, 'Clock Out berhasil', [
+            'status' => 'success',
+            'attendance_id' => $attendance['id']
+        ]);
+    }
 
-        if ($attendanceType === 'KDK' || $attendanceType === 'WFA') {
-            sendResponse(200, "Clock In berhasil ({$attendanceType})", [
-                'status' => 'success',
-                'location' => $attendanceType,
-                'attendance_id' => $newAttendanceId,
-                'is_confirmed' => true
-            ]);
-        } else {
-            sendResponse(202, 'Lokasi diluar area (KDM). Menunggu konfirmasi.', [
-                'status' => 'pending_confirmation',
-                'location' => 'KDM',
-                'attendance_id' => $newAttendanceId,
-                'is_confirmed' => false
-            ]);
-        }
-        
+    // No attendance yet = Clock In
+    $isConfirmed = ($attendanceType === 'KDM') ? 0 : 1;
+
+    $insertStmt = $pdo->prepare("
+        INSERT INTO absensi_attendances
+        (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, location_type, is_confirmed)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ");
+
+    $insertStmt->execute([
+        $user['user_id'],
+        $today,
+        $currentTime,
+        $userLat,
+        $userLng,
+        $attendanceType,
+        $isConfirmed
+    ]);
+
+    $newAttendanceId = $pdo->lastInsertId();
+
+    if ($attendanceType === 'KDK' || $attendanceType === 'WFA') {
+        sendResponse(200, "Clock In berhasil ({$attendanceType})", [
+            'status' => 'success',
+            'location' => $attendanceType,
+            'attendance_id' => $newAttendanceId,
+            'is_confirmed' => true
+        ]);
     } else {
-        sendResponse(400, 'Anda masih memiliki sesi absen aktif. Silakan Clock Out terlebih dahulu sebelum memulai absen baru.');
+        sendResponse(202, 'Lokasi diluar area (KDM). Menunggu konfirmasi.', [
+            'status' => 'pending_confirmation',
+            'location' => 'KDM',
+            'attendance_id' => $newAttendanceId,
+            'is_confirmed' => false
+        ]);
     }
 
 } catch (Exception $e) {

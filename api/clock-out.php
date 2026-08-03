@@ -21,20 +21,20 @@ try {
     $checkStmt->execute([$user['user_id'], $today]);
     $attendance = $checkStmt->fetch();
 
-    if (!$attendance) {
-        sendResponse(404, 'Data Absen Masuk hari ini tidak ditemukan. Silakan Clock In terlebih dahulu.');
-    }
+    // if (!$attendance) {
+    //     sendResponse(404, 'Data Absen Masuk hari ini tidak ditemukan. Silakan Clock In terlebih dahulu.');
+    // }
 
-    if ($attendance['clock_out_time'] !== NULL) {
-        sendResponse(400, 'Sesi absen ini sudah diakhiri. Silakan Clock In kembali jika ingin absensi baru.');
-    }
+    // if ($attendance['clock_out_time'] !== NULL) {
+    //     sendResponse(400, 'Sesi absen ini sudah diakhiri. Silakan Clock In kembali jika ingin absensi baru.');
+    // }
 
     $jamMasuk = strtotime($attendance['clock_in_time']);
     $durasi   = time() - $jamMasuk;
 
-    if ($durasi < 60) {
-        sendResponse(400, 'Tunggu minimal 1 menit setelah Clock In untuk bisa Absen Pulang.');
-    }
+    // if ($durasi < 60) {
+    //     sendResponse(400, 'Tunggu minimal 1 menit setelah Clock In untuk bisa Absen Pulang.');
+    // }
 
     $updateStmt = $pdo->prepare("
         UPDATE absensi_attendances 
