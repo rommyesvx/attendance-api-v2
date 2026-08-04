@@ -17,9 +17,30 @@ $today   = date('Y-m-d');
 $now     = date('Y-m-d H:i:s');
 
 try {
-    $checkStmt = $pdo->prepare("SELECT id, clock_in_time, clock_out_time FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
+    $checkStmt = $pdo->prepare("SELECT id, clock_in_time, clock_out_time, location_type FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
     $checkStmt->execute([$user['user_id'], $today]);
     $attendance = $checkStmt->fetch();
+
+    if ($attendance) {
+        if (empty($user['office_id'])) {
+            $attendanceType = 'KDM';
+        } else {
+            $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
+            $officeStmt->execute([$user['office_id']]);
+            $office = $officeStmt->fetch();
+
+            if ($office && !empty($office['polygon_coordinates'])) {
+                $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
+                $attendanceType = $inArea ? 'KDK' : 'KDM';
+            } else {
+                $attendanceType = 'KDM';
+            }
+        }
+
+        if ($attendance['location_type'] !== $attendanceType) {
+            sendResponse(400, "Gagal Absen Pulang! Jenis absensi saat ini ({$attendanceType}) tidak sesuai dengan saat Clock In ({$attendance['location_type']}). Lokasi absen harus sesuai dengan lokasi saat Clock In.");
+        }
+    }
 
     // if (!$attendance) {
     //     sendResponse(404, 'Data Absen Masuk hari ini tidak ditemukan. Silakan Clock In terlebih dahulu.');
@@ -38,7 +59,7 @@ try {
 
     $updateStmt = $pdo->prepare("
         UPDATE absensi_attendances 
-        SET clock_out_time = ?, clock_out_lat = ?, clock_out_lng = ? 
+        SET clock_out_time = ?, clock_out_lat = ?, clock_out_lng = ?, status = 'on_time' 
         WHERE id = ?
     ");
     $updateStmt->execute([$now, $userLat, $userLng, $attendance['id']]);

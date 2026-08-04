@@ -146,11 +146,7 @@ try {
 
     sendResponse(200, 'Laporan Patroli Berhasil Disimpan', [
         'time' => $now,
-<<<<<<< HEAD
-        'image_url' => $imagePath ? "https://caraka-biroumumpbj.kemendikdasmen.go.id" . $imagePath : null
-=======
-        'image_url' => $imagePath ? "https://caraka-biroumumpbj.kemendikdasmen.go.id/" . ltrim($imagePath, '../') : null
->>>>>>> 94dfb36aad6e5c44623dd769aed5b78540497ba0
+        'image_url' => $imagePath ? "https://caraka-biroumumpbj.kemendikdasmen.go.id" . ltrim($imagePath, '../') : null
     ]);
 
 } catch (Exception $e) {

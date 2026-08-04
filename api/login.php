@@ -31,11 +31,17 @@ if ($user && $password_acak === trim($user['user_password'])) {
 
     $jwt = generate_jwt($headers, $payload);
 
+    $updateStmt = $pdo->prepare("UPDATE user SET api_token = ? WHERE user_id = ?");
+    $updateStmt->execute([$jwt, $user['user_id']]);
+
     sendResponse(200, 'Login berhasil', [
         'token' => $jwt,
         'user' => [
             'name' => $user['user_name'],
-            'user_id' => $user['user_id'] 
+            'user_id' => $user['user_id'],
+            'user_jabatan' => $user['user_jabatan'] ?? null,
+            'user_type' => $user['user_type'] ?? null,
+            'is_security' => ($user['user_jabatan'] === 'Petugas Keamanan')
         ]
     ]);
 } else {

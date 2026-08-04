@@ -47,6 +47,9 @@ $attendance = $checkStmt->fetch();
 try {
       // Attendance already exists = Clock Out
     if ($attendance) {
+        if ($attendance['location_type'] !== $attendanceType) {
+            sendResponse(400, "Gagal Clock Out! Jenis absensi saat ini ({$attendanceType}) tidak sesuai dengan saat Clock In ({$attendance['location_type']}). Lokasi absen harus sesuai dengan lokasi saat Clock In.");
+        }
 
         $updateStmt = $pdo->prepare("
             UPDATE absensi_attendances
@@ -62,7 +65,7 @@ try {
             $currentTime,
             $userLat,
             $userLng,
-			'Late',
+			'on_time',
             $attendance['id']
         ]);
 
@@ -77,8 +80,8 @@ try {
 
     $insertStmt = $pdo->prepare("
         INSERT INTO absensi_attendances
-        (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, location_type, is_confirmed)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, location_type, is_confirmed, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ");
 
     $insertStmt->execute([
@@ -88,7 +91,8 @@ try {
         $userLat,
         $userLng,
         $attendanceType,
-        $isConfirmed
+        $isConfirmed,
+        'on_time'
     ]);
 
     $newAttendanceId = $pdo->lastInsertId();

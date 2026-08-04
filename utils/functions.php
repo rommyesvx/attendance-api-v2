@@ -134,6 +134,10 @@ function authenticate($pdo) {
         sendResponse(401, 'User tidak ditemukan');
     }
 
+    if (!isset($user['api_token']) || $user['api_token'] !== $token) {
+        sendResponse(401, 'Sesi telah berakhir atau akun telah login di perangkat lain');
+    }
+
     return $user;
 }
 ?>

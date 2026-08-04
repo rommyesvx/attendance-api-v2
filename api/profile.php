@@ -14,7 +14,8 @@ try {
             user.user_nip,
             user.user_alamat,
             user.user_birthday,
-            user.user_type, 
+            user.user_type,
+            user.user_jabatan,
             absensi_offices.name as office_name 
         FROM user 
         LEFT JOIN absensi_offices ON user.office_id = absensi_offices.id 
@@ -25,6 +26,7 @@ try {
     $profile = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($profile) {
+        $profile['is_security'] = ($profile['user_jabatan'] === 'Petugas Keamanan');
         sendResponse(200, 'Berhasil mengambil data profile', $profile);
     } else {
         sendResponse(404, 'User tidak ditemukan');
