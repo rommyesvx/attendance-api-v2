@@ -35,18 +35,29 @@ try {
         'Wednesday' => 'Rabu', 'Thursday' => 'Kamis', 'Friday' => 'Jumat', 'Saturday' => 'Sabtu'
     ];
 
+    $formatTime = function($timeStr, $default) {
+        if (!$timeStr || $timeStr === '00:00:00' || $timeStr === '00:00' || $timeStr === '-') {
+            return $default;
+        }
+        $ts = strtotime($timeStr);
+        return ($ts !== false) ? date('H:i', $ts) : $default;
+    };
+
     foreach ($schedules as $row) {
         $dayEnglish = date('l', strtotime($row['schedule_date']));
+        $rawIn  = $row['clock_in_target'] ?? null;
+        $rawOut = $row['clock_out_target'] ?? null;
+
         $formattedSchedules[] = [
             'id'                  => $row['id'],
             'schedule_date'       => $row['schedule_date'],
             'hari'                => $daysIndo[$dayEnglish] ?? $dayEnglish,
             'office_id'           => $row['office_id'],
             'office_name'         => $row['office_name'] ?? 'Kantor Utama',
-            'clock_in_target'     => $row['clock_in_target'],
-            'clock_out_target'    => $row['clock_out_target'],
-            'formatted_in_target' => $row['clock_in_target'] ? date('H:i', strtotime($row['clock_in_target'])) : '-',
-            'formatted_out_target'=> $row['clock_out_target'] ? date('H:i', strtotime($row['clock_out_target'])) : '-'
+            'clock_in_target'     => $rawIn,
+            'clock_out_target'    => $rawOut,
+            'formatted_in_target' => $formatTime($rawIn, '07:30'),
+            'formatted_out_target'=> $formatTime($rawOut, '16:00')
         ];
     }
 

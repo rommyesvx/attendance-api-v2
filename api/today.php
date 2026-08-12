@@ -59,15 +59,38 @@ try {
     $scheduleRecord = getUserScheduleRecord($pdo, $user['user_id'], $today);
     $userOffice     = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $today);
 
+    $rawClockIn = $scheduleRecord['clock_in_target'] 
+        ?? $scheduleRecord['clock_in_time'] 
+        ?? $scheduleRecord['jam_masuk'] 
+        ?? $scheduleRecord['shift_in'] 
+        ?? null;
+
+    $rawClockOut = $scheduleRecord['clock_out_target'] 
+        ?? $scheduleRecord['clock_out_time'] 
+        ?? $scheduleRecord['jam_pulang'] 
+        ?? $scheduleRecord['shift_out'] 
+        ?? null;
+
+    $formatTime = function($timeStr, $default) {
+        if (!$timeStr || $timeStr === '00:00:00' || $timeStr === '00:00' || $timeStr === '-') {
+            return $default;
+        }
+        $ts = strtotime($timeStr);
+        return ($ts !== false) ? date('H:i', $ts) : $default;
+    };
+
+    $formattedIn  = $formatTime($rawClockIn, '07:30');
+    $formattedOut = $formatTime($rawClockOut, '16:00');
+
     $scheduleInfo = [
-        'has_schedule'         => $scheduleRecord ? true : false,
+        'has_schedule'         => ($scheduleRecord && ($rawClockIn || $rawClockOut)) ? true : false,
         'office_id'            => $userOffice['id'] ?? null,
         'office_name'          => $userOffice['name'] ?? null,
         'schedule_date'        => $today,
-        'clock_in_target'      => $scheduleRecord['clock_in_target'] ?? null,
-        'clock_out_target'     => $scheduleRecord['clock_out_target'] ?? null,
-        'formatted_in_target'  => ($scheduleRecord && !empty($scheduleRecord['clock_in_target'])) ? date('H:i', strtotime($scheduleRecord['clock_in_target'])) : '07:30',
-        'formatted_out_target' => ($scheduleRecord && !empty($scheduleRecord['clock_out_target'])) ? date('H:i', strtotime($scheduleRecord['clock_out_target'])) : '16:00'
+        'clock_in_target'      => $rawClockIn,
+        'clock_out_target'     => $rawClockOut,
+        'formatted_in_target'  => $formattedIn,
+        'formatted_out_target' => $formattedOut
     ];
 
     sendResponse(200, 'Status absensi hari ini', [
