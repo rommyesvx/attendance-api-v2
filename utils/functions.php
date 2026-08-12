@@ -140,4 +140,146 @@ function authenticate($pdo) {
 
     return $user;
 }
+
+/**
+ * Mengambil record data dari tabel schedule (absensi_schedules / absensi_schedule)
+ */
+function getUserScheduleRecord($pdo, $userId, $date = null) {
+    if (!$date) {
+        $date = date('Y-m-d');
+    }
+
+    $tables = ['absensi_schedules', 'absensi_schedule'];
+    foreach ($tables as $tableName) {
+        try {
+            $colStmt = $pdo->query("SHOW COLUMNS FROM `{$tableName}`");
+            $columns = $colStmt->fetchAll(PDO::FETCH_COLUMN);
+
+            $dateCol = null;
+            if (in_array('schedule_date', $columns)) {
+                $dateCol = 'schedule_date';
+            } elseif (in_array('date', $columns)) {
+                $dateCol = 'date';
+            } elseif (in_array('schedule', $columns)) {
+                $dateCol = 'schedule';
+            }
+
+            $userCol = null;
+            if (in_array('user_id', $columns)) {
+                $userCol = 'user_id';
+            } elseif (in_array('id_user', $columns)) {
+                $userCol = 'id_user';
+            }
+
+            if ($dateCol && $userCol) {
+                $stmt = $pdo->prepare("
+                    SELECT * FROM `{$tableName}` 
+                    WHERE `{$userCol}` = ? AND `{$dateCol}` = ? 
+                    LIMIT 1
+                ");
+                $stmt->execute([$userId, $date]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($row) {
+                    return $row;
+                }
+            }
+        } catch (PDOException $e) {
+            continue;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Mengambil data kantor (absensi_offices) untuk user pada tanggal tertentu.
+ * Alur penentuan office_id:
+ * 1. Cek tabel absensi_schedules / absensi_schedule berdasarkan user_id dan tanggal.
+ * 2. Jika tidak ditemukan (atau user tidak ada di tabel schedule), fallback ke office_id dari tabel user.
+ * 3. Mengembalikan data record absensi_offices (array) atau null jika tidak ada/tidak valid.
+ */
+function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null) {
+    if (!$date) {
+        $date = date('Y-m-d');
+    }
+
+    $officeId = null;
+    $scheduleRecord = getUserScheduleRecord($pdo, $userId, $date);
+
+    if ($scheduleRecord && !empty($scheduleRecord['office_id'])) {
+        $officeId = $scheduleRecord['office_id'];
+    }
+
+    // 2. Fallback: Jika tidak ada di tabel schedule, gunakan fallbackOfficeId (dari tabel user)
+    if (empty($officeId)) {
+        $officeId = $fallbackOfficeId;
+    }
+
+    // 3. Ambil data absensi_offices jika officeId tersedia
+    if (!empty($officeId)) {
+        $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
+        $officeStmt->execute([$officeId]);
+        $office = $officeStmt->fetch(PDO::FETCH_ASSOC);
+        if ($office) {
+            return $office;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Memvalidasi apakah pegawai yang memiliki jadwal di tabel schedule mencoba clock out sebelum waktunya.
+ * Mengembalikan array ['valid' => true] atau ['valid' => false, 'message' => '...']
+ */
+function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = null) {
+    if (!$currentTime) {
+        $currentTime = date('Y-m-d H:i:s');
+    }
+
+    $scheduleRecord = getUserScheduleRecord($pdo, $userId, $shiftDate);
+
+    // Jika pegawai TIDAK ada di tabel schedule, diizinkan clock out (fallback)
+    if (!$scheduleRecord) {
+        return ['valid' => true];
+    }
+
+    // Cari kolom target jam pulang
+    $clockOutTarget = $scheduleRecord['clock_out_target'] 
+        ?? $scheduleRecord['clock_out_time'] 
+        ?? $scheduleRecord['jam_pulang'] 
+        ?? $scheduleRecord['shift_out'] 
+        ?? null;
+
+    // Jika tidak ada batasan jam pulang di tabel schedule, izinkan
+    if (!$clockOutTarget) {
+        return ['valid' => true];
+    }
+
+    // Cari jam masuk untuk cek shift malam/lintas hari
+    $clockInTarget = $scheduleRecord['clock_in_target'] 
+        ?? $scheduleRecord['clock_in_time'] 
+        ?? $scheduleRecord['jam_masuk'] 
+        ?? $scheduleRecord['shift_in'] 
+        ?? null;
+
+    // Tentukan timestamp target jam pulang
+    if ($clockInTarget && $clockOutTarget < $clockInTarget) {
+        // Shift malam lintas hari (contoh: 18:00 - 08:00 hari berikutnya)
+        $targetTimestamp = strtotime("$shiftDate $clockOutTarget +1 day");
+    } else {
+        $targetTimestamp = strtotime("$shiftDate $clockOutTarget");
+    }
+
+    if (strtotime($currentTime) < $targetTimestamp) {
+        $formattedTarget = date('H:i', strtotime($clockOutTarget));
+        return [
+            'valid' => false,
+            'target_time' => $clockOutTarget,
+            'message' => "Gagal Clock Out! Belum memasuki jam pulang sesuai jadwal Anda (Jam pulang: {$formattedTarget})."
+        ];
+    }
+
+    return ['valid' => true];
+}
 ?>

@@ -53,11 +53,9 @@ if (!$isWithinShift) {
     sendResponse(400, "Gagal Lapor! Saat ini Anda berada di luar jam shift patroli Anda.");
 }
 
-$officeStmt = $pdo->prepare("SELECT polygon_coordinates FROM absensi_offices WHERE id = ?");
-$officeStmt->execute([$user['office_id']]);
-$office = $officeStmt->fetch();
+$office = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $today);
 
-if (!isPointInPolygon($userLat, $userLng, $office['polygon_coordinates'])) {
+if (!$office || empty($office['polygon_coordinates']) || !isPointInPolygon($userLat, $userLng, $office['polygon_coordinates'])) {
     sendResponse(400, "Gagal Lapor! Posisi Anda di luar area patroli kantor.");
 }
 

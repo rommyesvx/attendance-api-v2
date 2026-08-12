@@ -17,29 +17,47 @@ $today   = date('Y-m-d');
 $now     = date('Y-m-d H:i:s');
 
 try {
-    $checkStmt = $pdo->prepare("SELECT id, clock_in_time, clock_out_time, location_type FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
-    $checkStmt->execute([$user['user_id'], $today]);
-    $attendance = $checkStmt->fetch();
+    // Cari sesi absensi aktif yang BELUM Clock Out (dalam kurun waktu 24 jam)
+    $openStmt = $pdo->prepare("
+        SELECT id, clock_in_time, clock_out_time, location_type, date 
+        FROM absensi_attendances 
+        WHERE user_id = ? AND clock_out_time IS NULL 
+        ORDER BY id DESC LIMIT 1
+    ");
+    $openStmt->execute([$user['user_id']]);
+    $activeAttendance = $openStmt->fetch();
+
+    $attendance = null;
+    if ($activeAttendance) {
+        $hoursElapsed = (time() - strtotime($activeAttendance['clock_in_time'])) / 3600;
+        if ($hoursElapsed <= 24) {
+            $attendance = $activeAttendance;
+        }
+    }
 
     if ($attendance) {
-        if (empty($user['office_id'])) {
-            $attendanceType = 'KDM';
-        } else {
-            $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
-            $officeStmt->execute([$user['office_id']]);
-            $office = $officeStmt->fetch();
+        $shiftDate = $attendance['date'];
 
-            if ($office && !empty($office['polygon_coordinates'])) {
-                $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
-                $attendanceType = $inArea ? 'KDK' : 'KDM';
-            } else {
-                $attendanceType = 'KDM';
-            }
+        // Cek apakah pegawai mencoba Clock Out sebelum jam pulang jadwalnya
+        $scheduleValidation = validateScheduleClockOutTime($pdo, $user['user_id'], $shiftDate, $now);
+        if (!$scheduleValidation['valid']) {
+            sendResponse(400, $scheduleValidation['message']);
+        }
+
+        $office = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $shiftDate);
+
+        if ($office && !empty($office['polygon_coordinates'])) {
+            $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
+            $attendanceType = $inArea ? 'KDK' : 'KDM';
+        } else {
+            $attendanceType = 'KDM';
         }
 
         if ($attendance['location_type'] !== $attendanceType) {
             sendResponse(400, "Gagal Absen Pulang! Jenis absensi saat ini ({$attendanceType}) tidak sesuai dengan saat Clock In ({$attendance['location_type']}). Lokasi absen harus sesuai dengan lokasi saat Clock In.");
         }
+    } else {
+        sendResponse(400, 'Data Absen Masuk tidak ditemukan atau sesi sudah diakhiri.');
     }
 
     // if (!$attendance) {

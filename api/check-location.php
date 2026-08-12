@@ -25,28 +25,43 @@ if ($holiday) {
     exit;
 }
 
-if (empty($user['office_id'])) {
-    $attendanceType = 'KDM';
-} else {
-    $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
-    $officeStmt->execute([$user['office_id']]);
-    $office = $officeStmt->fetch();
+// Cari sesi absensi aktif yang BELUM Clock Out (dalam kurun waktu 24 jam)
+$openStmt = $pdo->prepare("
+    SELECT * FROM absensi_attendances 
+    WHERE user_id = ? AND clock_out_time IS NULL 
+    ORDER BY id DESC LIMIT 1
+");
+$openStmt->execute([$user['user_id']]);
+$activeAttendance = $openStmt->fetch();
 
-    if ($office && !empty($office['polygon_coordinates'])) {
-        $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
-        $attendanceType = $inArea ? 'KDK' : 'KDM';
-    } else {
-        $attendanceType = 'KDM';
+$attendance = null;
+if ($activeAttendance) {
+    $hoursElapsed = (time() - strtotime($activeAttendance['clock_in_time'])) / 3600;
+    if ($hoursElapsed <= 24) {
+        $attendance = $activeAttendance;
     }
 }
 
-$checkStmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
-$checkStmt->execute([$user['user_id'], $today]);
-$attendance = $checkStmt->fetch();
+// Jika sedang Clock Out, acuan tanggal kantor diambil dari tanggal Clock In
+$shiftDate = $attendance ? $attendance['date'] : $today;
+$office = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $shiftDate);
+
+if ($office && !empty($office['polygon_coordinates'])) {
+    $inArea = isPointInPolygon($userLat, $userLng, $office['polygon_coordinates']);
+    $attendanceType = $inArea ? 'KDK' : 'KDM';
+} else {
+    $attendanceType = 'KDM';
+}
 
 try {
       // Attendance already exists = Clock Out
     if ($attendance) {
+        // Cek apakah pegawai mencoba Clock Out sebelum jam pulang jadwalnya
+        $scheduleValidation = validateScheduleClockOutTime($pdo, $user['user_id'], $shiftDate, $currentTime);
+        if (!$scheduleValidation['valid']) {
+            sendResponse(400, $scheduleValidation['message']);
+        }
+
         if ($attendance['location_type'] !== $attendanceType) {
             sendResponse(400, "Gagal Clock Out! Jenis absensi saat ini ({$attendanceType}) tidak sesuai dengan saat Clock In ({$attendance['location_type']}). Lokasi absen harus sesuai dengan lokasi saat Clock In.");
         }
@@ -71,6 +86,8 @@ try {
 
         sendResponse(200, 'Clock Out berhasil', [
             'status' => 'success',
+            'office_id' => $office ? $office['id'] : null,
+            'office_name' => $office ? $office['name'] : null,
             'attendance_id' => $attendance['id']
         ]);
     }
@@ -101,6 +118,8 @@ try {
         sendResponse(200, "Clock In berhasil ({$attendanceType})", [
             'status' => 'success',
             'location' => $attendanceType,
+            'office_id' => $office ? $office['id'] : null,
+            'office_name' => $office ? $office['name'] : null,
             'attendance_id' => $newAttendanceId,
             'is_confirmed' => true
         ]);
@@ -108,6 +127,8 @@ try {
         sendResponse(202, 'Lokasi diluar area (KDM). Menunggu konfirmasi.', [
             'status' => 'pending_confirmation',
             'location' => 'KDM',
+            'office_id' => $office ? $office['id'] : null,
+            'office_name' => $office ? $office['name'] : null,
             'attendance_id' => $newAttendanceId,
             'is_confirmed' => false
         ]);
