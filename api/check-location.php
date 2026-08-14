@@ -42,6 +42,21 @@ if ($activeAttendance) {
     }
 }
 
+// Jika tidak ada sesi yang belum clock out, cek apakah hari ini sudah ada data absensi (sudah Clock In & Clock Out)
+if (!$attendance) {
+    $todayStmt = $pdo->prepare("
+        SELECT * FROM absensi_attendances 
+        WHERE user_id = ? AND date = ? 
+        ORDER BY id DESC LIMIT 1
+    ");
+    $todayStmt->execute([$user['user_id'], $today]);
+    $todayAttendance = $todayStmt->fetch();
+
+    if ($todayAttendance) {
+        $attendance = $todayAttendance;
+    }
+}
+
 // Jika sedang Clock Out, acuan tanggal kantor diambil dari tanggal Clock In
 $shiftDate = $attendance ? $attendance['date'] : $today;
 $office = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $shiftDate);
