@@ -60,7 +60,7 @@ if (!$office || empty($office['polygon_coordinates']) || !isPointInPolygon($user
 }
 
 
-$attStmt = $pdo->prepare("SELECT id, clock_out_time FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id DESC LIMIT 1");
+$attStmt = $pdo->prepare("SELECT id, clock_out_time FROM absensi_attendances WHERE user_id = ? AND is_confirmed = 1 AND date = ? ORDER BY id DESC LIMIT 1");
 $attStmt->execute([$user['user_id'], $today]);
 $attendance = $attStmt->fetch();
 

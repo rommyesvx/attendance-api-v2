@@ -21,7 +21,7 @@ try {
     $openStmt = $pdo->prepare("
         SELECT id, clock_in_time, clock_out_time, location_type, date 
         FROM absensi_attendances 
-        WHERE user_id = ? AND clock_out_time IS NULL 
+        WHERE user_id = ? AND is_confirmed = 1 AND clock_out_time IS NULL 
         ORDER BY id DESC LIMIT 1
     ");
     $openStmt->execute([$user['user_id']]);
@@ -40,7 +40,7 @@ try {
         $todayStmt = $pdo->prepare("
             SELECT id, clock_in_time, clock_out_time, location_type, date 
             FROM absensi_attendances 
-            WHERE user_id = ? AND date = ? 
+            WHERE user_id = ? AND is_confirmed = 1 AND date = ? 
             ORDER BY id DESC LIMIT 1
         ");
         $todayStmt->execute([$user['user_id'], $today]);

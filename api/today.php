@@ -9,7 +9,7 @@ try {
     // Cek dulu apakah ada sesi yang masih clocked_in (termasuk shift malam kemarin)
     $activeStmt = $pdo->prepare("
         SELECT * FROM absensi_attendances 
-        WHERE user_id = ? AND clock_out_time IS NULL 
+        WHERE user_id = ? AND is_confirmed = 1 AND clock_out_time IS NULL 
         ORDER BY id DESC LIMIT 1
     ");
     $activeStmt->execute([$user['user_id']]);
@@ -25,7 +25,7 @@ try {
         $jamMasuk = $activeAtt['clock_in_time'];
         $latestTime = $activeAtt['clock_in_time'];
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND date = ? ORDER BY id ASC");
+        $stmt = $pdo->prepare("SELECT * FROM absensi_attendances WHERE user_id = ? AND is_confirmed = 1 AND date = ? ORDER BY id ASC");
         $stmt->execute([$user['user_id'], $today]);
         $attendances = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

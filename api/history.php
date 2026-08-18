@@ -20,6 +20,7 @@ try {
             a.location_type as status
         FROM absensi_attendances a
         WHERE a.user_id = ? 
+        AND a.is_confirmed = 1
         AND MONTH(a.date) = ? 
         AND YEAR(a.date) = ? 
         ORDER BY a.date DESC, a.clock_in_time DESC

@@ -28,7 +28,7 @@ if ($holiday) {
 // Cari sesi absensi aktif yang BELUM Clock Out (dalam kurun waktu 24 jam)
 $openStmt = $pdo->prepare("
     SELECT * FROM absensi_attendances 
-    WHERE user_id = ? AND clock_out_time IS NULL 
+    WHERE user_id = ? AND is_confirmed = 1 AND clock_out_time IS NULL 
     ORDER BY id DESC LIMIT 1
 ");
 $openStmt->execute([$user['user_id']]);
@@ -46,7 +46,7 @@ if ($activeAttendance) {
 if (!$attendance) {
     $todayStmt = $pdo->prepare("
         SELECT * FROM absensi_attendances 
-        WHERE user_id = ? AND date = ? 
+        WHERE user_id = ? AND is_confirmed = 1 AND date = ? 
         ORDER BY id DESC LIMIT 1
     ");
     $todayStmt->execute([$user['user_id'], $today]);
@@ -107,13 +107,25 @@ try {
         ]);
     }
 
-    // No attendance yet = Clock In
-    $isConfirmed = ($attendanceType === 'KDM') ? 0 : 1;
+    // Jika terdeteksi KDM (luar area): JANGAN simpan ke DB dulu! Kembalikan HTTP 202
+    if ($attendanceType === 'KDM') {
+        sendResponse(202, 'Lokasi diluar area (KDM). Menunggu konfirmasi.', [
+            'status' => 'pending_confirmation',
+            'location' => 'KDM',
+            'office_id' => $office ? $office['id'] : null,
+            'office_name' => $office ? $office['name'] : null,
+            'latitude' => $userLat,
+            'longitude' => $userLng,
+            'is_confirmed' => false
+        ]);
+        exit;
+    }
 
+    // Jika KDK (Di area kantor): Langsung INSERT ke DB
     $insertStmt = $pdo->prepare("
         INSERT INTO absensi_attendances
         (user_id, date, clock_in_time, clock_in_lat, clock_in_lng, location_type, is_confirmed, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 'on_time')
     ");
 
     $insertStmt->execute([
@@ -122,32 +134,19 @@ try {
         $currentTime,
         $userLat,
         $userLng,
-        $attendanceType,
-        $isConfirmed,
-        'on_time'
+        $attendanceType
     ]);
 
     $newAttendanceId = $pdo->lastInsertId();
 
-    if ($attendanceType === 'KDK' || $attendanceType === 'WFA') {
-        sendResponse(200, "Clock In berhasil ({$attendanceType})", [
-            'status' => 'success',
-            'location' => $attendanceType,
-            'office_id' => $office ? $office['id'] : null,
-            'office_name' => $office ? $office['name'] : null,
-            'attendance_id' => $newAttendanceId,
-            'is_confirmed' => true
-        ]);
-    } else {
-        sendResponse(202, 'Lokasi diluar area (KDM). Menunggu konfirmasi.', [
-            'status' => 'pending_confirmation',
-            'location' => 'KDM',
-            'office_id' => $office ? $office['id'] : null,
-            'office_name' => $office ? $office['name'] : null,
-            'attendance_id' => $newAttendanceId,
-            'is_confirmed' => false
-        ]);
-    }
+    sendResponse(200, "Clock In berhasil ({$attendanceType})", [
+        'status' => 'success',
+        'location' => $attendanceType,
+        'office_id' => $office ? $office['id'] : null,
+        'office_name' => $office ? $office['name'] : null,
+        'attendance_id' => $newAttendanceId,
+        'is_confirmed' => true
+    ]);
 
 } catch (Exception $e) {
     sendResponse(500, 'Terjadi kesalahan server: ' . $e->getMessage());
