@@ -5,6 +5,15 @@ require_once '../utils/functions.php';
 date_default_timezone_set('Asia/Jakarta');
 
 $user = authenticate($pdo);
+if (empty($user['office_id'])) {
+    $user['office_id'] = 2;
+    try {
+        $updateUserOffice = $pdo->prepare("UPDATE user SET office_id = 2 WHERE user_id = ? AND (office_id IS NULL OR office_id = '' OR office_id = 0)");
+        $updateUserOffice->execute([$user['user_id']]);
+    } catch (Exception $e) {
+        // Ignore exception
+    }
+}
 $input = json_decode(file_get_contents("php://input"), true);
 
 if (!isset($input['confirmation_status']) || $input['confirmation_status'] !== true) {

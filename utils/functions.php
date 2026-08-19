@@ -215,7 +215,20 @@ function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null) {
         $officeId = $fallbackOfficeId;
     }
 
-    // 3. Ambil data absensi_offices jika officeId tersedia
+    // 3. Jika office_id masih kosong/null, otomatis diset ke 2 dan diupdate ke tabel user
+    if (empty($officeId)) {
+        $officeId = 2;
+        if ($userId) {
+            try {
+                $updateUserStmt = $pdo->prepare("UPDATE user SET office_id = 2 WHERE user_id = ? AND (office_id IS NULL OR office_id = '' OR office_id = 0)");
+                $updateUserStmt->execute([$userId]);
+            } catch (Exception $e) {
+                // Ignore exception if user table cannot be updated
+            }
+        }
+    }
+
+    // 4. Ambil data absensi_offices jika officeId tersedia
     if (!empty($officeId)) {
         $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
         $officeStmt->execute([$officeId]);

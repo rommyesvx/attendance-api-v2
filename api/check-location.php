@@ -57,6 +57,17 @@ if (!$attendance) {
     }
 }
 
+// Jika user office_id nya null/kosong, otomatis diset ke 2 dan diupdate di DB
+if (empty($user['office_id'])) {
+    $user['office_id'] = 2;
+    try {
+        $updateUserOffice = $pdo->prepare("UPDATE user SET office_id = 2 WHERE user_id = ? AND (office_id IS NULL OR office_id = '' OR office_id = 0)");
+        $updateUserOffice->execute([$user['user_id']]);
+    } catch (Exception $e) {
+        // Ignore exception
+    }
+}
+
 // Jika sedang Clock Out, acuan tanggal kantor diambil dari tanggal Clock In
 $shiftDate = $attendance ? $attendance['date'] : $today;
 $office = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $shiftDate);
