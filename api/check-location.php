@@ -13,7 +13,7 @@ if (!isset($input['latitude']) || !isset($input['longitude'])) {
 
 $userLat = $input['latitude'];
 $userLng = $input['longitude'];
-$today   = date('Y-m-d');
+$today = date('Y-m-d');
 $currentTime = date('Y-m-d H:i:s');
 
 $stmt_holiday = $pdo->prepare("SELECT name FROM absensi_holidays WHERE date = ?");
@@ -53,9 +53,18 @@ if (!$attendance) {
     $todayAttendance = $todayStmt->fetch();
 
     if ($todayAttendance) {
-        $attendance = $todayAttendance;
+        // Cek apakah pegawai ini memiliki jadwal untuk hari ini
+        $hasSchedule = getUserScheduleRecord($pdo, $user['user_id'], $today);
+
+        if ($hasSchedule && !empty($todayAttendance['clock_out_time'])) {
+            // Pegawai terjadwal yang absen lagi -> buat baris baru
+        } else {
+            // Pegawai tidak terjadwal atau belum clock out -> update baris ini
+            $attendance = $todayAttendance;
+        }
     }
 }
+
 
 // Jika user office_id nya null/kosong, otomatis diset ke 2 dan diupdate di DB
 if (empty($user['office_id'])) {
@@ -80,7 +89,7 @@ if ($office && !empty($office['polygon_coordinates'])) {
 }
 
 try {
-      // Attendance already exists = Clock Out
+    // Attendance already exists = Clock Out
     if ($attendance) {
         // Cek apakah pegawai mencoba Clock Out sebelum jam pulang jadwalnya
         $scheduleValidation = validateScheduleClockOutTime($pdo, $user['user_id'], $shiftDate, $currentTime);
@@ -106,7 +115,7 @@ try {
             $currentTime,
             $userLat,
             $userLng,
-			'on_time',
+            'on_time',
             $attendance['id']
         ]);
 
@@ -116,6 +125,12 @@ try {
             'office_name' => $office ? $office['name'] : null,
             'attendance_id' => $attendance['id']
         ]);
+    } else {
+        // Attendance does not exist = Validation for new Clock In
+        $clockInValidation = validateScheduleClockInTime($pdo, $user['user_id'], $shiftDate, $currentTime);
+        if (!$clockInValidation['valid']) {
+            sendResponse(400, $clockInValidation['message']);
+        }
     }
 
     // Jika terdeteksi KDM (luar area): JANGAN simpan ke DB dulu! Kembalikan HTTP 202

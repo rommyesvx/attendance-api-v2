@@ -1,7 +1,8 @@
 <?php
 
 define('JWT_SECRET_KEY', 'AutentikasiAbsensiAPI2026!');
-function sendResponse($code, $message, $data = null) {
+function sendResponse($code, $message, $data = null)
+{
     http_response_code($code);
     echo json_encode([
         'status' => $code == 200 || $code == 201 ? 'success' : 'error',
@@ -11,78 +12,139 @@ function sendResponse($code, $message, $data = null) {
     exit();
 }
 
-function pwdgenerate($awal) {
-    $awal1  = substr($awal,0,8);
-    $awal2  = substr($awal,8,8);
-    $awal3  = substr($awal,16,8);
-    $awal4  = substr($awal,24,7);
-    $awal5  = substr($awal,31,1);
-    
+function pwdgenerate($awal)
+{
+    $awal1 = substr($awal, 0, 8);
+    $awal2 = substr($awal, 8, 8);
+    $awal3 = substr($awal, 16, 8);
+    $awal4 = substr($awal, 24, 7);
+    $awal5 = substr($awal, 31, 1);
+
     //STARTING ENCRYPT
     $awal6 = pwdrein($awal5);
-    return $awal4.$awal2.$awal1.$awal3.$awal6;
+    return $awal4 . $awal2 . $awal1 . $awal3 . $awal6;
 }
 
-function pwdrein($w) {
-    if ($w=='a'){ return '1'; } elseif ($w=='b'){ return 'z'; }
-    elseif ($w=='c'){ return '2'; } elseif ($w=='d'){ return 'f'; }
-    elseif ($w=='e'){ return '3'; } elseif ($w=='f'){ return 'x'; }
-    elseif ($w=='g'){ return 'c'; } elseif ($w=='h'){ return 'r'; }
-    elseif ($w=='i'){ return '4'; } elseif ($w=='j'){ return 's'; }
-    elseif ($w=='k'){ return 'q'; } elseif ($w=='l'){ return 'v'; }
-    elseif ($w=='m'){ return 'e'; } elseif ($w=='n'){ return '5'; }
-    elseif ($w=='o'){ return 'b'; } elseif ($w=='p'){ return '8'; }
-    elseif ($w=='q'){ return 'a'; } elseif ($w=='r'){ return '9'; }
-    elseif ($w=='s'){ return 'l'; } elseif ($w=='t'){ return '6'; }
-    elseif ($w=='u'){ return 'p'; } elseif ($w=='v'){ return 'j'; }
-    elseif ($w=='w'){ return 'u'; } elseif ($w=='x'){ return '7'; }
-    elseif ($w=='y'){ return 'w'; } elseif ($w=='z'){ return 'o'; }
-    elseif ($w=='1'){ return 'g'; } elseif ($w=='2'){ return 'h'; }
-    elseif ($w=='3'){ return 'i'; } elseif ($w=='4'){ return 'd'; }
-    elseif ($w=='5'){ return 'n'; } elseif ($w=='6'){ return 't'; }
-    elseif ($w=='7'){ return 'k'; } elseif ($w=='8'){ return 'y'; }
-    elseif ($w=='9'){ return 'm'; } elseif ($w=='0'){ return '0'; }
+function pwdrein($w)
+{
+    if ($w == 'a') {
+        return '1';
+    } elseif ($w == 'b') {
+        return 'z';
+    } elseif ($w == 'c') {
+        return '2';
+    } elseif ($w == 'd') {
+        return 'f';
+    } elseif ($w == 'e') {
+        return '3';
+    } elseif ($w == 'f') {
+        return 'x';
+    } elseif ($w == 'g') {
+        return 'c';
+    } elseif ($w == 'h') {
+        return 'r';
+    } elseif ($w == 'i') {
+        return '4';
+    } elseif ($w == 'j') {
+        return 's';
+    } elseif ($w == 'k') {
+        return 'q';
+    } elseif ($w == 'l') {
+        return 'v';
+    } elseif ($w == 'm') {
+        return 'e';
+    } elseif ($w == 'n') {
+        return '5';
+    } elseif ($w == 'o') {
+        return 'b';
+    } elseif ($w == 'p') {
+        return '8';
+    } elseif ($w == 'q') {
+        return 'a';
+    } elseif ($w == 'r') {
+        return '9';
+    } elseif ($w == 's') {
+        return 'l';
+    } elseif ($w == 't') {
+        return '6';
+    } elseif ($w == 'u') {
+        return 'p';
+    } elseif ($w == 'v') {
+        return 'j';
+    } elseif ($w == 'w') {
+        return 'u';
+    } elseif ($w == 'x') {
+        return '7';
+    } elseif ($w == 'y') {
+        return 'w';
+    } elseif ($w == 'z') {
+        return 'o';
+    } elseif ($w == '1') {
+        return 'g';
+    } elseif ($w == '2') {
+        return 'h';
+    } elseif ($w == '3') {
+        return 'i';
+    } elseif ($w == '4') {
+        return 'd';
+    } elseif ($w == '5') {
+        return 'n';
+    } elseif ($w == '6') {
+        return 't';
+    } elseif ($w == '7') {
+        return 'k';
+    } elseif ($w == '8') {
+        return 'y';
+    } elseif ($w == '9') {
+        return 'm';
+    } elseif ($w == '0') {
+        return '0';
+    }
     return $w;
 }
 
-function generate_jwt($headers, $payload, $secret = JWT_SECRET_KEY) {
-	$headers_encoded = rtrim(strtr(base64_encode(json_encode($headers)), '+/', '-_'), '=');
-	$payload_encoded = rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
-	
-	$signature = hash_hmac('SHA256', "$headers_encoded.$payload_encoded", $secret, true);
-	$signature_encoded = rtrim(strtr(base64_encode($signature), '+/', '-_'), '=');
-	
-	return "$headers_encoded.$payload_encoded.$signature_encoded";
+function generate_jwt($headers, $payload, $secret = JWT_SECRET_KEY)
+{
+    $headers_encoded = rtrim(strtr(base64_encode(json_encode($headers)), '+/', '-_'), '=');
+    $payload_encoded = rtrim(strtr(base64_encode(json_encode($payload)), '+/', '-_'), '=');
+
+    $signature = hash_hmac('SHA256', "$headers_encoded.$payload_encoded", $secret, true);
+    $signature_encoded = rtrim(strtr(base64_encode($signature), '+/', '-_'), '=');
+
+    return "$headers_encoded.$payload_encoded.$signature_encoded";
 }
 
-function validate_jwt($token, $secret = JWT_SECRET_KEY) {
-	$tokenParts = explode('.', $token);
-    if (count($tokenParts) != 3) return false;
+function validate_jwt($token, $secret = JWT_SECRET_KEY)
+{
+    $tokenParts = explode('.', $token);
+    if (count($tokenParts) != 3)
+        return false;
 
-	$header = base64_decode(strtr($tokenParts[0], '-_', '+/'));
-	$payload = base64_decode(strtr($tokenParts[1], '-_', '+/'));
-	$signature_provided = $tokenParts[2];
+    $header = base64_decode(strtr($tokenParts[0], '-_', '+/'));
+    $payload = base64_decode(strtr($tokenParts[1], '-_', '+/'));
+    $signature_provided = $tokenParts[2];
 
     $payload_data = json_decode($payload, true);
     if (isset($payload_data['exp']) && $payload_data['exp'] < time()) {
         return false; // Token kadaluarsa
     }
 
-	$base64_url_header = rtrim(strtr(base64_encode($header), '+/', '-_'), '=');
-	$base64_url_payload = rtrim(strtr(base64_encode($payload), '+/', '-_'), '=');
-	$signature = hash_hmac('SHA256', $base64_url_header . "." . $base64_url_payload, $secret, true);
-	$base64_url_signature = rtrim(strtr(base64_encode($signature), '+/', '-_'), '=');
+    $base64_url_header = rtrim(strtr(base64_encode($header), '+/', '-_'), '=');
+    $base64_url_payload = rtrim(strtr(base64_encode($payload), '+/', '-_'), '=');
+    $signature = hash_hmac('SHA256', $base64_url_header . "." . $base64_url_payload, $secret, true);
+    $base64_url_signature = rtrim(strtr(base64_encode($signature), '+/', '-_'), '=');
 
-	if ($base64_url_signature === $signature_provided) {
-		return $payload_data; // Token Valid, kembalikan isinya
-	} else {
-		return false; // Token Palsu
-	}
+    if ($base64_url_signature === $signature_provided) {
+        return $payload_data; // Token Valid, kembalikan isinya
+    } else {
+        return false; // Token Palsu
+    }
 }
 
-function isPointInPolygon($pointLat, $pointLng, $polygonJson) {
+function isPointInPolygon($pointLat, $pointLng, $polygonJson)
+{
     $vertices = json_decode($polygonJson, true);
-    
+
     if (!$vertices || count($vertices) < 3) {
         return false;
     }
@@ -91,10 +153,10 @@ function isPointInPolygon($pointLat, $pointLng, $polygonJson) {
     $isInside = false;
 
     for ($i = 0, $j = $verticesCount - 1; $i < $verticesCount; $j = $i++) {
-        
+
         $lati = $vertices[$i]['lat'];
         $lngi = $vertices[$i]['lng'];
-        
+
         $latj = $vertices[$j]['lat'];
         $lngj = $vertices[$j]['lng'];
 
@@ -109,7 +171,8 @@ function isPointInPolygon($pointLat, $pointLng, $polygonJson) {
     return $isInside;
 }
 
-function authenticate($pdo) {
+function authenticate($pdo)
+{
     $headers = getallheaders();
     if (!isset($headers['Authorization'])) {
         sendResponse(401, 'Gagal: Request ini butuh TOKEN (Bearer Token).');
@@ -144,7 +207,8 @@ function authenticate($pdo) {
 /**
  * Mengambil record data dari tabel schedule (absensi_schedules / absensi_schedule)
  */
-function getUserScheduleRecord($pdo, $userId, $date = null) {
+function getUserScheduleRecord($pdo, $userId, $date = null)
+{
     if (!$date) {
         $date = date('Y-m-d');
     }
@@ -191,14 +255,8 @@ function getUserScheduleRecord($pdo, $userId, $date = null) {
     return null;
 }
 
-/**
- * Mengambil data kantor (absensi_offices) untuk user pada tanggal tertentu.
- * Alur penentuan office_id:
- * 1. Cek tabel absensi_schedules / absensi_schedule berdasarkan user_id dan tanggal.
- * 2. Jika tidak ditemukan (atau user tidak ada di tabel schedule), fallback ke office_id dari tabel user.
- * 3. Mengembalikan data record absensi_offices (array) atau null jika tidak ada/tidak valid.
- */
-function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null) {
+function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null)
+{
     if (!$date) {
         $date = date('Y-m-d');
     }
@@ -245,7 +303,8 @@ function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null) {
  * Memvalidasi apakah pegawai yang memiliki jadwal di tabel schedule mencoba clock out sebelum waktunya.
  * Mengembalikan array ['valid' => true] atau ['valid' => false, 'message' => '...']
  */
-function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = null) {
+function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = null)
+{
     if (!$currentTime) {
         $currentTime = date('Y-m-d H:i:s');
     }
@@ -258,10 +317,10 @@ function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = 
     }
 
     // Cari kolom target jam pulang
-    $clockOutTarget = $scheduleRecord['clock_out_target'] 
-        ?? $scheduleRecord['clock_out_time'] 
-        ?? $scheduleRecord['jam_pulang'] 
-        ?? $scheduleRecord['shift_out'] 
+    $clockOutTarget = $scheduleRecord['clock_out_target']
+        ?? $scheduleRecord['clock_out_time']
+        ?? $scheduleRecord['jam_pulang']
+        ?? $scheduleRecord['shift_out']
         ?? null;
 
     // Jika tidak ada batasan jam pulang di tabel schedule, izinkan
@@ -270,10 +329,10 @@ function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = 
     }
 
     // Cari jam masuk untuk cek shift malam/lintas hari
-    $clockInTarget = $scheduleRecord['clock_in_target'] 
-        ?? $scheduleRecord['clock_in_time'] 
-        ?? $scheduleRecord['jam_masuk'] 
-        ?? $scheduleRecord['shift_in'] 
+    $clockInTarget = $scheduleRecord['clock_in_target']
+        ?? $scheduleRecord['clock_in_time']
+        ?? $scheduleRecord['jam_masuk']
+        ?? $scheduleRecord['shift_in']
         ?? null;
 
     // Tentukan timestamp target jam pulang
@@ -290,6 +349,56 @@ function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = 
             'valid' => false,
             'target_time' => $clockOutTarget,
             'message' => "Gagal Clock Out! Belum memasuki jam pulang sesuai jadwal Anda (Jam pulang: {$formattedTarget})."
+        ];
+    }
+
+    return ['valid' => true];
+}
+
+/**
+ * Memvalidasi apakah pegawai yang memiliki jadwal di tabel schedule mencoba clock in terlalu awal.
+ * Batas toleransi paling awal adalah 30 menit sebelum jam masuk.
+ * Mengembalikan array ['valid' => true] atau ['valid' => false, 'message' => '...']
+ */
+function validateScheduleClockInTime($pdo, $userId, $shiftDate, $currentTime = null)
+{
+    if (!$currentTime) {
+        $currentTime = date('Y-m-d H:i:s');
+    }
+
+    $scheduleRecord = getUserScheduleRecord($pdo, $userId, $shiftDate);
+
+    // Jika pegawai TIDAK ada di tabel schedule, diizinkan clock in kapan saja (bebas)
+    if (!$scheduleRecord) {
+        return ['valid' => true];
+    }
+
+    // Cari kolom target jam masuk
+    $clockInTarget = $scheduleRecord['clock_in_target']
+        ?? $scheduleRecord['clock_in_time']
+        ?? $scheduleRecord['jam_masuk']
+        ?? $scheduleRecord['shift_in']
+        ?? null;
+
+    // Jika tidak ada batasan jam masuk di tabel schedule, izinkan
+    if (!$clockInTarget) {
+        return ['valid' => true];
+    }
+
+    // Tentukan timestamp target jam masuk
+    $targetTimestamp = strtotime("$shiftDate $clockInTarget");
+
+    // Batas paling awal (30 menit sebelumnya)
+    $earliestAllowedTimestamp = $targetTimestamp - (30 * 60);
+
+    // Jika mencoba clock in sebelum batas paling awal (30 menit)
+    if (strtotime($currentTime) < $earliestAllowedTimestamp) {
+        $formattedTarget = date('H:i', strtotime($clockInTarget));
+        $formattedEarliest = date('H:i', $earliestAllowedTimestamp);
+        return [
+            'valid' => false,
+            'target_time' => $clockInTarget,
+            'message' => "Gagal Clock In! Belum waktunya absen masuk. Anda baru diizinkan absen mulai pukul {$formattedEarliest} (Jam masuk: {$formattedTarget})."
         ];
     }
 

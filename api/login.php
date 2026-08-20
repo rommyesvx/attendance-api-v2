@@ -26,7 +26,7 @@ if ($user && $password_acak === trim($user['user_password'])) {
         'sub' => $user['user_id'],
         'user_id' => $user['user_id'], 
         'iat' => time(),           
-        'exp' => time() + (60 * 60 * 24) 
+        'exp' => time() + (60 * 60 * 24 * 30) 
     ];
 
     $jwt = generate_jwt($headers, $payload);
