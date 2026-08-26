@@ -27,18 +27,21 @@ $today   = date('Y-m-d');
 $currentTime = date('Y-m-d H:i:s');
 
 try {
-    // Jika attendance_id dikirim (skema lama)
-    if ($attendanceId) {
+    // Jika attendance_id dikirim dan valid secara numerik (skema lama)
+    if (!empty($attendanceId) && is_numeric($attendanceId) && (int)$attendanceId > 0) {
         $updateStmt = $pdo->prepare("UPDATE absensi_attendances SET is_confirmed = 1 WHERE id = ? AND user_id = ?");
         $updateStmt->execute([$attendanceId, $user['user_id']]);
 
-        sendResponse(200, 'Absen KDM berhasil dikonfirmasi', [
-            'status' => 'success',
-            'attendance_id' => $attendanceId,
-            'is_confirmed' => true
-        ]);
-        exit;
+        if ($updateStmt->rowCount() > 0) {
+            sendResponse(200, 'Absen KDM berhasil dikonfirmasi', [
+                'status' => 'success',
+                'attendance_id' => (int)$attendanceId,
+                'is_confirmed' => true
+            ]);
+            exit;
+        }
     }
+
 
     // Skema baru: INSERT ke DB baru dilakukan saat konfirmasi
     if (!$userLat || !$userLng) {
