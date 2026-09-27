@@ -17,23 +17,9 @@ $today   = date('Y-m-d');
 $now     = date('Y-m-d H:i:s');
 
 try {
-    // Cari sesi absensi aktif yang BELUM Clock Out (dalam kurun waktu 24 jam)
-    $openStmt = $pdo->prepare("
-        SELECT id, clock_in_time, clock_out_time, location_type, date 
-        FROM absensi_attendances 
-        WHERE user_id = ? AND is_confirmed = 1 AND clock_out_time IS NULL 
-        ORDER BY id DESC LIMIT 1
-    ");
-    $openStmt->execute([$user['user_id']]);
-    $activeAttendance = $openStmt->fetch();
+    // Cari sesi absensi aktif yang BELUM Clock Out dan masih valid
+    $attendance = getActiveAttendance($pdo, $user['user_id'], $now);
 
-    $attendance = null;
-    if ($activeAttendance) {
-        $hoursElapsed = (time() - strtotime($activeAttendance['clock_in_time'])) / 3600;
-        if ($hoursElapsed <= 24) {
-            $attendance = $activeAttendance;
-        }
-    }
 
     // Jika tidak ada sesi yang belum clock out, cek apakah hari ini sudah ada data absensi untuk memperbarui jam pulang (meniban clock out)
     if (!$attendance) {

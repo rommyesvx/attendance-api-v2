@@ -7,20 +7,14 @@ $today = date('Y-m-d');
 
 try {
     // Cek dulu apakah ada sesi yang masih clocked_in (termasuk shift malam kemarin)
-    $activeStmt = $pdo->prepare("
-        SELECT * FROM absensi_attendances 
-        WHERE user_id = ? AND is_confirmed = 1 AND clock_out_time IS NULL 
-        ORDER BY id DESC LIMIT 1
-    ");
-    $activeStmt->execute([$user['user_id']]);
-    $activeAtt = $activeStmt->fetch(PDO::FETCH_ASSOC);
+    $activeAtt = getActiveAttendance($pdo, $user['user_id']);
 
     $statusAbsen = 'not_clocked_in';
     $jamMasuk = null;
     $jamPulang = null;
     $latestTime = null;
 
-    if ($activeAtt && ((time() - strtotime($activeAtt['clock_in_time'])) / 3600) <= 24) {
+    if ($activeAtt) {
         $statusAbsen = 'clocked_in';
         $jamMasuk = $activeAtt['clock_in_time'];
         $latestTime = $activeAtt['clock_in_time'];

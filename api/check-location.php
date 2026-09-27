@@ -25,22 +25,9 @@ if ($holiday) {
     exit;
 }
 
-// Cari sesi absensi aktif yang BELUM Clock Out (dalam kurun waktu 24 jam)
-$openStmt = $pdo->prepare("
-    SELECT * FROM absensi_attendances 
-    WHERE user_id = ? AND is_confirmed = 1 AND clock_out_time IS NULL 
-    ORDER BY id DESC LIMIT 1
-");
-$openStmt->execute([$user['user_id']]);
-$activeAttendance = $openStmt->fetch();
+// Cari sesi absensi aktif yang BELUM Clock Out dan masih valid
+$attendance = getActiveAttendance($pdo, $user['user_id'], $currentTime);
 
-$attendance = null;
-if ($activeAttendance) {
-    $hoursElapsed = (time() - strtotime($activeAttendance['clock_in_time'])) / 3600;
-    if ($hoursElapsed <= 24) {
-        $attendance = $activeAttendance;
-    }
-}
 
 // Jika tidak ada sesi yang belum clock out, cek apakah hari ini sudah ada data absensi (sudah Clock In & Clock Out)
 if (!$attendance) {
