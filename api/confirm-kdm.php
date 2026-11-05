@@ -15,6 +15,7 @@ if (empty($user['office_id'])) {
     }
 }
 $input = json_decode(file_get_contents("php://input"), true);
+validateRequestDevice($pdo, $user, $input, true);
 
 if (!isset($input['confirmation_status']) || $input['confirmation_status'] !== true) {
     sendResponse(400, 'Status konfirmasi tidak valid, harus bernilai true');

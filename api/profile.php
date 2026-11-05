@@ -27,10 +27,13 @@ try {
     if ($profile) {
         $today = date('Y-m-d');
         $office = getUserOffice($pdo, $profile['user_id'], $profile['office_id'] ?? null, $today);
+        $approvedDeviceUuid = getApprovedUserDeviceUuid($pdo, $user);
         
         $profile['office_name'] = $office ? $office['name'] : null;
         $profile['office_id'] = $office ? $office['id'] : null;
         $profile['is_security'] = ($profile['user_jabatan'] === 'Petugas Keamanan');
+        $profile['device_uuid'] = $approvedDeviceUuid;
+        $profile['registered_device_uuid'] = $approvedDeviceUuid;
         
         sendResponse(200, 'Berhasil mengambil data profile', $profile);
     } else {

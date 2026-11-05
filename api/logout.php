@@ -2,7 +2,7 @@
 require_once '../config/database.php';
 require_once '../utils/functions.php';
 
-$user = authenticate($pdo);
+$user = authenticate($pdo, false);
 
 try {
     $stmt = $pdo->prepare("UPDATE user SET api_token = NULL WHERE user_id = ?");

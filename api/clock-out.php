@@ -6,6 +6,7 @@ date_default_timezone_set('Asia/Jakarta');
 
 $user = authenticate($pdo);
 $input = json_decode(file_get_contents("php://input"), true);
+validateRequestDevice($pdo, $user, $input, true);
 
 if (!isset($input['latitude']) || !isset($input['longitude'])) {
     sendResponse(400, 'Koordinat latitude dan longitude wajib dikirim untuk Absen Pulang');

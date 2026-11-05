@@ -12,6 +12,287 @@ function sendResponse($code, $message, $data = null)
     exit();
 }
 
+function sendDeviceError($httpCode, $errorCode, $deviceStatus, $message, $extraData = [])
+{
+    http_response_code($httpCode);
+    $response = [
+        'status' => 'error',
+        'code' => $errorCode,
+        'device_status' => $deviceStatus,
+        'message' => $message
+    ];
+    if (!empty($extraData)) {
+        $response['data'] = $extraData;
+    }
+    echo json_encode($response);
+    exit();
+}
+
+function getRequestHeadersNormalized()
+{
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    $normalized = [];
+    if (is_array($headers)) {
+        foreach ($headers as $key => $value) {
+            $normalized[strtolower($key)] = $value;
+        }
+    }
+    if (!isset($normalized['authorization'])) {
+        if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+            $normalized['authorization'] = $_SERVER['HTTP_AUTHORIZATION'];
+        } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $normalized['authorization'] = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        }
+    }
+    if (!isset($normalized['x-device-uuid']) && !empty($_SERVER['HTTP_X_DEVICE_UUID'])) {
+        $normalized['x-device-uuid'] = $_SERVER['HTTP_X_DEVICE_UUID'];
+    }
+    return $normalized;
+}
+
+function extractDeviceUuid($input = null)
+{
+    if (is_array($input)) {
+        $candidates = [
+            $input['device_uuid'] ?? null,
+            $input['imei'] ?? null,
+            $input['device_id'] ?? null
+        ];
+        foreach ($candidates as $candidate) {
+            if ($candidate !== null && trim((string)$candidate) !== '') {
+                return trim((string)$candidate);
+            }
+        }
+    }
+
+    $headers = getRequestHeadersNormalized();
+    if (!empty($headers['x-device-uuid']) && trim((string)$headers['x-device-uuid']) !== '') {
+        return trim((string)$headers['x-device-uuid']);
+    }
+
+    return '';
+}
+
+function verifyUserCredentials($pdo, $userId, $userPassword)
+{
+    $stmt = $pdo->prepare("SELECT * FROM user WHERE user_id = ?");
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$user) {
+        return null;
+    }
+
+    $md5_input = md5($userPassword);
+    $password_acak = pwdgenerate($md5_input);
+
+    if ($password_acak === trim($user['user_password'])) {
+        return $user;
+    }
+
+    return null;
+}
+
+/**
+ * Mengambil device_uuid aktif yang sudah di-approve untuk user.
+ * Mensinkronkan tabel device_registrations (status = 'approved' terbaru) dan kolom user.device_uuid.
+ */
+function getApprovedUserDeviceUuid($pdo, $user)
+{
+    if (!$user || empty($user['user_id'])) {
+        return null;
+    }
+
+    $userId = $user['user_id'];
+    $userColUuid = isset($user['device_uuid']) && trim((string)$user['device_uuid']) !== ''
+        ? trim((string)$user['device_uuid'])
+        : null;
+
+    try {
+        // Cari registrasi perangkat berstatus 'approved' terbaru milik user ini
+        $stmt = $pdo->prepare("
+            SELECT device_uuid
+            FROM device_registrations
+            WHERE user_id = ? AND status = 'approved'
+            ORDER BY COALESCE(reviewed_at, requested_at) DESC, id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$userId]);
+        $approvedRow = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($approvedRow && trim((string)$approvedRow['device_uuid']) !== '') {
+            $approvedUuid = trim((string)$approvedRow['device_uuid']);
+
+            // Sinkronkan ke kolom user.device_uuid bila berbeda/kosong
+            if ($userColUuid !== $approvedUuid) {
+                try {
+                    $syncStmt = $pdo->prepare("UPDATE user SET device_uuid = ? WHERE user_id = ?");
+                    $syncStmt->execute([$approvedUuid, $userId]);
+                } catch (Exception $e) {
+                    // Abaikan jika kolom belum ada
+                }
+            }
+
+            return $approvedUuid;
+        }
+
+        // Jika tidak ada yang 'approved' di device_registrations, periksa apakah user.device_uuid diisi manual oleh Admin
+        if ($userColUuid !== null) {
+            $latestStmt = $pdo->prepare("
+                SELECT status
+                FROM device_registrations
+                WHERE user_id = ? AND device_uuid = ?
+                ORDER BY id DESC
+                LIMIT 1
+            ");
+            $latestStmt->execute([$userId, $userColUuid]);
+            $latestRow = $latestStmt->fetch(PDO::FETCH_ASSOC);
+
+            // Jika status terakhir di device_registrations adalah 'rejected' atau 'pending', berarti belum/tidak disetujui
+            if ($latestRow && in_array($latestRow['status'], ['rejected', 'pending'], true)) {
+                if ($latestRow['status'] === 'rejected') {
+                    try {
+                        $clearStmt = $pdo->prepare("UPDATE user SET device_uuid = NULL WHERE user_id = ?");
+                        $clearStmt->execute([$userId]);
+                    } catch (Exception $e) {
+                    }
+                }
+                return null;
+            }
+
+            return $userColUuid;
+        }
+    } catch (Exception $e) {
+        // Fallback jika tabel device_registrations belum dimigrasi
+        return $userColUuid;
+    }
+
+    return null;
+}
+
+/**
+ * Mengecek apakah suatu device_uuid sedang terikat (approved aktif) pada user_id lain.
+ */
+function isDeviceBoundToAnotherUser($pdo, $deviceUuid, $currentUserId)
+{
+    $deviceUuid = trim((string)$deviceUuid);
+    if ($deviceUuid === '') {
+        return false;
+    }
+
+    $candidateUserIds = [];
+
+    // 1. Cek dari kolom user.device_uuid
+    try {
+        $uStmt = $pdo->prepare("SELECT user_id FROM user WHERE device_uuid = ? AND user_id != ?");
+        $uStmt->execute([$deviceUuid, $currentUserId]);
+        while ($row = $uStmt->fetch(PDO::FETCH_ASSOC)) {
+            $candidateUserIds[$row['user_id']] = true;
+        }
+    } catch (Exception $e) {
+        // Abaikan jika kolom user.device_uuid belum tersedia
+    }
+
+    // 2. Cek dari riwayat device_registrations berstatus approved pada akun lain
+    try {
+        $dStmt = $pdo->prepare("
+            SELECT DISTINCT user_id
+            FROM device_registrations
+            WHERE device_uuid = ? AND user_id != ? AND status = 'approved'
+        ");
+        $dStmt->execute([$deviceUuid, $currentUserId]);
+        while ($row = $dStmt->fetch(PDO::FETCH_ASSOC)) {
+            $candidateUserIds[$row['user_id']] = true;
+        }
+    } catch (Exception $e) {
+    }
+
+    // Pastikan apakah deviceUuid tersebut benar-benar masih menjadi device aktif yang di-approve pada user lain tersebut
+    foreach (array_keys($candidateUserIds) as $otherUserId) {
+        $otherStmt = $pdo->prepare("SELECT * FROM user WHERE user_id = ? LIMIT 1");
+        $otherStmt->execute([$otherUserId]);
+        $otherUser = $otherStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($otherUser) {
+            $otherApprovedUuid = getApprovedUserDeviceUuid($pdo, $otherUser);
+            if ($otherApprovedUuid !== null && $otherApprovedUuid === $deviceUuid) {
+                return true;
+            }
+        } else {
+            $lastStmt = $pdo->prepare("
+                SELECT device_uuid
+                FROM device_registrations
+                WHERE user_id = ? AND status = 'approved'
+                ORDER BY COALESCE(reviewed_at, requested_at) DESC, id DESC
+                LIMIT 1
+            ");
+            $lastStmt->execute([$otherUserId]);
+            $lastApproved = $lastStmt->fetch(PDO::FETCH_ASSOC);
+            if ($lastApproved && trim((string)$lastApproved['device_uuid']) === $deviceUuid) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Memvalidasi kecocokan device_uuid request terhadap akun user.
+ * Mengeluarkan HTTP 403 (DEVICE_PENDING / DEVICE_NOT_REGISTERED) bila tidak sesuai.
+ */
+function validateRequestDevice($pdo, $user, $input = null, $requireDeviceInput = true)
+{
+    $deviceUuid = extractDeviceUuid($input);
+    $approvedUuid = getApprovedUserDeviceUuid($pdo, $user);
+
+    if ($deviceUuid === '') {
+        if (!$requireDeviceInput) {
+            return $approvedUuid;
+        }
+        sendDeviceError(
+            403,
+            'DEVICE_NOT_REGISTERED',
+            'unregistered',
+            'Perangkat ini belum terdaftar pada akun Anda. Silakan lakukan Register Device.'
+        );
+    }
+
+    // 1. Jika device_uuid cocok dengan perangkat aktif yang sudah di-approve
+    if ($approvedUuid !== null && $deviceUuid === $approvedUuid) {
+        return $approvedUuid;
+    }
+
+    // 2. Cek apakah ada pengajuan untuk device_uuid tersebut yang masih berstatus pending
+    try {
+        $pendingStmt = $pdo->prepare("
+            SELECT id
+            FROM device_registrations
+            WHERE user_id = ? AND device_uuid = ? AND status = 'pending'
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $pendingStmt->execute([$user['user_id'], $deviceUuid]);
+        if ($pendingStmt->fetch(PDO::FETCH_ASSOC)) {
+            sendDeviceError(
+                403,
+                'DEVICE_PENDING',
+                'pending',
+                'Pendaftaran perangkat Anda sedang menunggu persetujuan (Approval) Admin.'
+            );
+        }
+    } catch (Exception $e) {
+    }
+
+    // 3. Belum pernah mendaftarkan perangkat atau device_uuid berbeda dari perangkat yang di-approve
+    sendDeviceError(
+        403,
+        'DEVICE_NOT_REGISTERED',
+        'unregistered',
+        'Perangkat ini belum terdaftar pada akun Anda. Silakan lakukan Register Device.'
+    );
+}
+
 function pwdgenerate($awal)
 {
     $awal1 = substr($awal, 0, 8);
@@ -171,15 +452,15 @@ function isPointInPolygon($pointLat, $pointLng, $polygonJson)
     return $isInside;
 }
 
-function authenticate($pdo)
+function authenticate($pdo, $checkDevice = true)
 {
-    $headers = getallheaders();
-    if (!isset($headers['Authorization'])) {
+    $headers = getRequestHeadersNormalized();
+    if (!isset($headers['authorization'])) {
         sendResponse(401, 'Gagal: Request ini butuh TOKEN (Bearer Token).');
     }
 
-    $authHeader = $headers['Authorization'];
-    $token = str_replace('Bearer ', '', $authHeader);
+    $authHeader = $headers['authorization'];
+    $token = trim(preg_replace('/^Bearer\s+/i', '', $authHeader));
 
     $payload = validate_jwt($token);
 
@@ -199,6 +480,20 @@ function authenticate($pdo)
 
     if (!isset($user['api_token']) || $user['api_token'] !== $token) {
         sendResponse(401, 'Sesi telah berakhir atau akun telah login di perangkat lain');
+    }
+
+    if ($checkDevice) {
+        $headerDeviceUuid = extractDeviceUuid(null);
+        $sessionDeviceUuid = $headerDeviceUuid !== ''
+            ? $headerDeviceUuid
+            : (isset($payload['device_uuid']) ? trim((string)$payload['device_uuid']) : '');
+
+        if ($sessionDeviceUuid !== '') {
+            $approvedUuid = validateRequestDevice($pdo, $user, ['device_uuid' => $sessionDeviceUuid], true);
+            $user['device_uuid'] = $approvedUuid;
+        } else {
+            $user['device_uuid'] = getApprovedUserDeviceUuid($pdo, $user);
+        }
     }
 
     return $user;
