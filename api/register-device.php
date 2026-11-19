@@ -51,6 +51,10 @@ if (!$user) {
     sendResponse(401, 'User ID atau Password salah');
 }
 
+if (!isPilotTestUser($user)) {
+    sendResponse(403, 'Fitur registrasi perangkat saat ini sedang dalam tahap pengujian terbatas.');
+}
+
 try {
     // 2. Cek apakah device_uuid sudah terikat (approved) pada user_id lain (1 HP tidak boleh dipakai 2 akun)
     if (isDeviceBoundToAnotherUser($pdo, $deviceUuid, $user['user_id'])) {
@@ -77,6 +81,81 @@ try {
 
     $now = date('Y-m-d H:i:s');
 
+    // Cek apakah akun ini sudah pernah memiliki perangkat yang disetujui sebelumnya
+    $approvedHistoryStmt = $pdo->prepare("SELECT COUNT(*) FROM device_registrations WHERE user_id = ? AND status = 'approved'");
+    $approvedHistoryStmt->execute([$user['user_id']]);
+    $approvedHistoryCount = (int)$approvedHistoryStmt->fetchColumn();
+
+    // Jika belum pernah punya perangkat approved sama sekali (pendaftaran pertama kali), otomatis langsung APPROVED
+    if ($approvedHistoryCount === 0) {
+        $firstReason = $reasonValue !== null ? $reasonValue : 'Pendaftaran Pertama';
+
+        // Jika sebelumnya sempat ada baris pending pertama untuk user ini, ubah menjadi approved; jika belum ada, INSERT baru
+        $firstPendingStmt = $pdo->prepare("SELECT id FROM device_registrations WHERE user_id = ? ORDER BY id ASC LIMIT 1");
+        $firstPendingStmt->execute([$user['user_id']]);
+        $firstExistingRow = $firstPendingStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($firstExistingRow) {
+            $upgradeFirstStmt = $pdo->prepare("
+                UPDATE device_registrations
+                SET device_uuid = ?,
+                    device_model = COALESCE(?, device_model),
+                    device_platform = COALESCE(?, device_platform),
+                    reason = ?,
+                    status = 'approved',
+                    requested_at = ?,
+                    reviewed_by = 'AUTO_FIRST_DEVICE',
+                    reviewed_at = ?
+                WHERE id = ?
+            ");
+            $upgradeFirstStmt->execute([
+                $deviceUuid,
+                $deviceModel,
+                $devicePlatform,
+                $firstReason,
+                $now,
+                $now,
+                $firstExistingRow['id']
+            ]);
+        } else {
+            $insertFirstStmt = $pdo->prepare("
+                INSERT INTO device_registrations
+                (user_id, device_uuid, device_model, device_platform, reason, status, requested_at, reviewed_by, reviewed_at)
+                VALUES (?, ?, ?, ?, ?, 'approved', ?, 'AUTO_FIRST_DEVICE', ?)
+            ");
+            $insertFirstStmt->execute([
+                $user['user_id'],
+                $deviceUuid,
+                $deviceModel,
+                $devicePlatform,
+                $firstReason,
+                $now,
+                $now
+            ]);
+        }
+
+        try {
+            $syncUserStmt = $pdo->prepare("UPDATE user SET device_uuid = ? WHERE user_id = ?");
+            $syncUserStmt->execute([$deviceUuid, $user['user_id']]);
+        } catch (Exception $e) {
+            // Abaikan jika kolom user.device_uuid belum tersedia
+        }
+
+        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM device_registrations WHERE user_id = ?");
+        $countStmt->execute([$user['user_id']]);
+        $registrationCount = (int)$countStmt->fetchColumn();
+
+        sendResponse(
+            200,
+            'Registrasi perangkat pertama berhasil dan otomatis disetujui. Silakan langsung Login.',
+            [
+                'registration_count' => max(1, $registrationCount),
+                'device_status' => 'approved'
+            ]
+        );
+    }
+
+    // Untuk pendaftaran ke-2 dan seterusnya (Ganti HP / Reset Pabrik), wajib menunggu approval Admin (status = 'pending')
     // Cek apakah sudah ada pengajuan pending untuk device_uuid yang sama dari user ini (mencegah duplikasi klik ganda)
     $existingPendingStmt = $pdo->prepare("
         SELECT id

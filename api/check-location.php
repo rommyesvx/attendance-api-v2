@@ -44,10 +44,10 @@ if (!$attendance) {
         // Cek apakah pegawai ini memiliki jadwal untuk hari ini
         $hasSchedule = getUserScheduleRecord($pdo, $user['user_id'], $today);
 
-        if ($hasSchedule && !empty($todayAttendance['clock_out_time'])) {
-            // Pegawai terjadwal yang absen lagi -> buat baris baru
+        if (isSecurityUser($user) && $hasSchedule && !empty($todayAttendance['clock_out_time'])) {
+            // Petugas keamanan terjadwal yang absen shift lagi di hari yang sama -> buat baris baru
         } else {
-            // Pegawai tidak terjadwal atau belum clock out -> update baris ini
+            // Pegawai reguler atau sesi belum clock out -> update baris ini
             $attendance = $todayAttendance;
         }
     }
@@ -95,7 +95,7 @@ try {
                 clock_out_time = ?,
                 clock_out_lat = ?,
                 clock_out_lng = ?,
-				status = ?
+                status = ?
             WHERE id = ?
         ");
 

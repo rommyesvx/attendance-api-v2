@@ -56,6 +56,12 @@ try {
         sendResponse(400, 'Anda sudah melakukan presensi hari ini.');
     }
 
+    // Validasi jam masuk berdasarkan jadwal shift (master_shift)
+    $clockInValidation = validateScheduleClockInTime($pdo, $user['user_id'], $today, $currentTime);
+    if (!$clockInValidation['valid']) {
+        sendResponse(400, $clockInValidation['message']);
+    }
+
     // Lakukan INSERT resmi ke DB
     $insertStmt = $pdo->prepare("
         INSERT INTO absensi_attendances

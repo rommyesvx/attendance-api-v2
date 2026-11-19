@@ -49,7 +49,7 @@ if ($user) {
             'user_id' => $user['user_id'],
             'user_jabatan' => $user['user_jabatan'] ?? null,
             'user_type' => $user['user_type'] ?? null,
-            'is_security' => ($user['user_jabatan'] === 'Petugas Keamanan'),
+            'is_security' => isSecurityUser($user),
             'device_uuid' => $approvedDeviceUuid,
             'registered_device_uuid' => $approvedDeviceUuid
         ]

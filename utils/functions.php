@@ -1,6 +1,27 @@
 <?php
 
 define('JWT_SECRET_KEY', 'AutentikasiAbsensiAPI2026!');
+
+/**
+ * Mode Testing / Pilot untuk fitur Patrol & Register New Device.
+ * Jika PILOT_MODE_ENABLED = true, maka fitur Patrol dan validasi Register Device
+ * HANYA aktif untuk user_id yang terdaftar di PILOT_TEST_USER_IDS.
+ * Jika siap dirilis untuk seluruh pegawai, cukup ubah PILOT_MODE_ENABLED menjadi false.
+ */
+define('PILOT_MODE_ENABLED', true);
+define('PILOT_TEST_USER_IDS', [
+    '3175082710030004', // Satpam Rommy
+]);
+
+function isPilotTestUser($userOrId)
+{
+    if (!PILOT_MODE_ENABLED) {
+        return true;
+    }
+    $userId = is_array($userOrId) ? ($userOrId['user_id'] ?? '') : (string)$userOrId;
+    $userId = trim((string)$userId);
+    return in_array($userId, PILOT_TEST_USER_IDS, true);
+}
 function sendResponse($code, $message, $data = null)
 {
     http_response_code($code);
@@ -103,6 +124,12 @@ function getApprovedUserDeviceUuid($pdo, $user)
         return null;
     }
 
+    if (!isPilotTestUser($user)) {
+        return isset($user['device_uuid']) && trim((string)$user['device_uuid']) !== ''
+            ? trim((string)$user['device_uuid'])
+            : null;
+    }
+
     $userId = $user['user_id'];
     $userColUuid = isset($user['device_uuid']) && trim((string)$user['device_uuid']) !== ''
         ? trim((string)$user['device_uuid'])
@@ -136,35 +163,17 @@ function getApprovedUserDeviceUuid($pdo, $user)
             return $approvedUuid;
         }
 
-        // Jika tidak ada yang 'approved' di device_registrations, periksa apakah user.device_uuid diisi manual oleh Admin
+        // Jika belum ada baris berstatus 'approved' di tabel device_registrations,
+        // pastikan kolom user.device_uuid dikosongkan agar sumber kebenaran tetap dari device_registrations
         if ($userColUuid !== null) {
-            $latestStmt = $pdo->prepare("
-                SELECT status
-                FROM device_registrations
-                WHERE user_id = ? AND device_uuid = ?
-                ORDER BY id DESC
-                LIMIT 1
-            ");
-            $latestStmt->execute([$userId, $userColUuid]);
-            $latestRow = $latestStmt->fetch(PDO::FETCH_ASSOC);
-
-            // Jika status terakhir di device_registrations adalah 'rejected' atau 'pending', berarti belum/tidak disetujui
-            if ($latestRow && in_array($latestRow['status'], ['rejected', 'pending'], true)) {
-                if ($latestRow['status'] === 'rejected') {
-                    try {
-                        $clearStmt = $pdo->prepare("UPDATE user SET device_uuid = NULL WHERE user_id = ?");
-                        $clearStmt->execute([$userId]);
-                    } catch (Exception $e) {
-                    }
-                }
-                return null;
+            try {
+                $clearStmt = $pdo->prepare("UPDATE user SET device_uuid = NULL WHERE user_id = ?");
+                $clearStmt->execute([$userId]);
+            } catch (Exception $e) {
             }
-
-            return $userColUuid;
         }
     } catch (Exception $e) {
-        // Fallback jika tabel device_registrations belum dimigrasi
-        return $userColUuid;
+        return null;
     }
 
     return null;
@@ -243,6 +252,17 @@ function isDeviceBoundToAnotherUser($pdo, $deviceUuid, $currentUserId)
  */
 function validateRequestDevice($pdo, $user, $input = null, $requireDeviceInput = true)
 {
+    // Selama mode testing (PILOT_MODE_ENABLED = true), akun di luar whitelist tidak dikenakan validasi device
+    if (!isPilotTestUser($user)) {
+        $deviceUuid = extractDeviceUuid($input);
+        if ($deviceUuid !== '') {
+            return $deviceUuid;
+        }
+        return isset($user['device_uuid']) && trim((string)$user['device_uuid']) !== ''
+            ? trim((string)$user['device_uuid'])
+            : null;
+    }
+
     $deviceUuid = extractDeviceUuid($input);
     $approvedUuid = getApprovedUserDeviceUuid($pdo, $user);
 
@@ -422,27 +442,98 @@ function validate_jwt($token, $secret = JWT_SECRET_KEY)
     }
 }
 
+function normalizePolygonVertices($polygonJson)
+{
+    $vertices = is_array($polygonJson) ? $polygonJson : json_decode((string)$polygonJson, true);
+    if (!is_array($vertices) || count($vertices) < 3) {
+        return [];
+    }
+
+    $normalized = [];
+    foreach ($vertices as $vertex) {
+        if (!is_array($vertex)) {
+            continue;
+        }
+        if (isset($vertex['lat'], $vertex['lng'])) {
+            $normalized[] = ['lat' => (float)$vertex['lat'], 'lng' => (float)$vertex['lng']];
+        } elseif (isset($vertex['latitude'], $vertex['longitude'])) {
+            $normalized[] = ['lat' => (float)$vertex['latitude'], 'lng' => (float)$vertex['longitude']];
+        } elseif (isset($vertex[0], $vertex[1])) {
+            $normalized[] = ['lat' => (float)$vertex[0], 'lng' => (float)$vertex[1]];
+        }
+    }
+
+    return count($normalized) >= 3 ? $normalized : [];
+}
+
+function distanceMeters($lat1, $lng1, $lat2, $lng2)
+{
+    $earthRadius = 6371000.0;
+    $dLat = deg2rad((float)$lat2 - (float)$lat1);
+    $dLng = deg2rad((float)$lng2 - (float)$lng1);
+    $a = sin($dLat / 2) * sin($dLat / 2)
+        + cos(deg2rad((float)$lat1)) * cos(deg2rad((float)$lat2))
+        * sin($dLng / 2) * sin($dLng / 2);
+    $c = 2 * atan2(sqrt($a), sqrt(max(0.0, 1.0 - $a)));
+    return $earthRadius * $c;
+}
+
+function pointToSegmentDistanceMeters($pLat, $pLng, $aLat, $aLng, $bLat, $bLng)
+{
+    $refLatRad = deg2rad(((float)$aLat + (float)$bLat + (float)$pLat) / 3.0);
+    $metersPerLat = 111132.92;
+    $metersPerLng = 111412.84 * cos($refLatRad);
+
+    $ax = (float)$aLng * $metersPerLng;
+    $ay = (float)$aLat * $metersPerLat;
+    $bx = (float)$bLng * $metersPerLng;
+    $by = (float)$bLat * $metersPerLat;
+    $px = (float)$pLng * $metersPerLng;
+    $py = (float)$pLat * $metersPerLat;
+
+    $dx = $bx - $ax;
+    $dy = $by - $ay;
+    $lenSq = ($dx * $dx) + ($dy * $dy);
+
+    if ($lenSq <= 0.0) {
+        return hypot($px - $ax, $py - $ay);
+    }
+
+    $t = (($px - $ax) * $dx + ($py - $ay) * $dy) / $lenSq;
+    $t = max(0.0, min(1.0, $t));
+
+    $projX = $ax + $t * $dx;
+    $projY = $ay + $t * $dy;
+
+    return hypot($px - $projX, $py - $projY);
+}
+
 function isPointInPolygon($pointLat, $pointLng, $polygonJson)
 {
-    $vertices = json_decode($polygonJson, true);
+    $vertices = normalizePolygonVertices($polygonJson);
+    $verticesCount = count($vertices);
 
-    if (!$vertices || count($vertices) < 3) {
+    if ($verticesCount < 3) {
         return false;
     }
 
-    $verticesCount = count($vertices);
+    $lat = (float)$pointLat;
+    $lng = (float)$pointLng;
     $isInside = false;
 
     for ($i = 0, $j = $verticesCount - 1; $i < $verticesCount; $j = $i++) {
-
         $lati = $vertices[$i]['lat'];
         $lngi = $vertices[$i]['lng'];
 
         $latj = $vertices[$j]['lat'];
         $lngj = $vertices[$j]['lng'];
 
-        $intersect = (($lngi > $pointLng) != ($lngj > $pointLng)) &&
-            ($pointLat < ($latj - $lati) * ($pointLng - $lngi) / ($lngj - $lngi) + $lati);
+        if ($lngj == $lngi) {
+            continue;
+        }
+
+        $intersect = (($lngi > $lng) != ($lngj > $lng)) &&
+            ($lat < ($latj - $lati) * ($lng - $lngi) / ($lngj - $lngi) + $lati);
 
         if ($intersect) {
             $isInside = !$isInside;
@@ -450,6 +541,49 @@ function isPointInPolygon($pointLat, $pointLng, $polygonJson)
     }
 
     return $isInside;
+}
+
+function isPointWithinGeofence($pointLat, $pointLng, $office, $toleranceMeters = 25.0)
+{
+    if (!$office || !is_numeric($pointLat) || !is_numeric($pointLng)) {
+        return false;
+    }
+
+    $lat = (float)$pointLat;
+    $lng = (float)$pointLng;
+
+    if (!empty($office['polygon_coordinates'])) {
+        if (isPointInPolygon($lat, $lng, $office['polygon_coordinates'])) {
+            return true;
+        }
+
+        if ($toleranceMeters > 0) {
+            $vertices = normalizePolygonVertices($office['polygon_coordinates']);
+            $count = count($vertices);
+            for ($i = 0, $j = $count - 1; $i < $count; $j = $i++) {
+                $dist = pointToSegmentDistanceMeters(
+                    $lat,
+                    $lng,
+                    $vertices[$j]['lat'],
+                    $vertices[$j]['lng'],
+                    $vertices[$i]['lat'],
+                    $vertices[$i]['lng']
+                );
+                if ($dist <= $toleranceMeters) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    if (isset($office['latitude'], $office['longitude']) && is_numeric($office['latitude']) && is_numeric($office['longitude'])) {
+        $radius = isset($office['radius']) && is_numeric($office['radius']) ? (float)$office['radius'] : 100.0;
+        return distanceMeters($lat, $lng, (float)$office['latitude'], (float)$office['longitude']) <= ($radius + max(0.0, (float)$toleranceMeters));
+    }
+
+    return false;
 }
 
 function authenticate($pdo, $checkDevice = true)
@@ -488,19 +622,107 @@ function authenticate($pdo, $checkDevice = true)
             ? $headerDeviceUuid
             : (isset($payload['device_uuid']) ? trim((string)$payload['device_uuid']) : '');
 
-        if ($sessionDeviceUuid !== '') {
-            $approvedUuid = validateRequestDevice($pdo, $user, ['device_uuid' => $sessionDeviceUuid], true);
-            $user['device_uuid'] = $approvedUuid;
-        } else {
-            $user['device_uuid'] = getApprovedUserDeviceUuid($pdo, $user);
-        }
+        $approvedUuid = validateRequestDevice($pdo, $user, ['device_uuid' => $sessionDeviceUuid], true);
+        $user['device_uuid'] = $approvedUuid;
     }
 
     return $user;
 }
 
 /**
- * Mengambil record data dari tabel schedule (absensi_schedules / absensi_schedule)
+ * Mengecek apakah user memiliki jabatan Petugas Keamanan.
+ * Fitur absen tiap jam (patroli) hanya berlaku untuk Petugas Keamanan.
+ */
+function isSecurityUser($user)
+{
+    if (!is_array($user)) {
+        return false;
+    }
+    // Selama mode testing (PILOT_MODE_ENABLED = true), fitur patroli hanya aktif untuk user_id testing
+    if (!isPilotTestUser($user)) {
+        return false;
+    }
+    $jabatan = trim((string)($user['user_jabatan'] ?? ''));
+    return strcasecmp($jabatan, 'Petugas Keamanan') === 0;
+}
+
+/**
+ * Menormalisasi nilai waktu jam shift (mengembalikan null jika kosong atau 00:00:00).
+ */
+function normalizeShiftTime($timeStr)
+{
+    if ($timeStr === null) {
+        return null;
+    }
+    $trimmed = trim((string)$timeStr);
+    if ($trimmed === '' || $trimmed === '00:00:00' || $trimmed === '00:00' || $trimmed === '-') {
+        return null;
+    }
+    return $trimmed;
+}
+
+/**
+ * Menormalisasi record gabungan dari master_shift_user dan master_shift.
+ */
+function normalizeMasterShiftRecord($row, $date)
+{
+    if (!$row) {
+        return null;
+    }
+
+    $jamMasuk = normalizeShiftTime($row['shift_jam_masuk'] ?? null);
+    $jamPulang = normalizeShiftTime($row['shift_jam_pulang'] ?? null);
+    $shiftName = trim((string)($row['shift_name'] ?? ''));
+
+    // Placeholder: Jika ke depannya rumus rotasi untuk shift_type 2 & 3 (saat jam masih 00:00:00)
+    // sudah ditentukan, perhitungannya dapat ditempatkan di sini.
+
+    $tipeShift = null;
+    $isOvernight = false;
+
+    if ($jamMasuk !== null && $jamPulang !== null) {
+        if ($jamPulang < $jamMasuk || (int)substr($jamMasuk, 0, 2) >= 18 || stripos($shiftName, 'malam') !== false) {
+            $tipeShift = 'malam';
+            $isOvernight = true;
+        } else {
+            $tipeShift = 'pagi';
+            $isOvernight = false;
+        }
+    } elseif (stripos($shiftName, 'malam') !== false) {
+        $tipeShift = 'malam';
+        $isOvernight = true;
+    }
+
+    return [
+        'id'                => $row['shiftuser_id'] ?? null,
+        'shiftuser_id'      => $row['shiftuser_id'] ?? null,
+        'user_id'           => $row['user_id'] ?? null,
+        'shift_id'          => $row['shift_id'] ?? null,
+        'shift_name'        => $shiftName !== '' ? $shiftName : null,
+        'shift_type'        => $row['shift_type'] ?? null,
+        'shift_group'       => $row['shift_group'] ?? null,
+        'shift_team'        => $row['shift_team'] ?? null,
+        'shift_mulai'       => $row['shift_mulai'] ?? null,
+        'shift_toleransi'   => isset($row['shift_toleransi']) ? (int)$row['shift_toleransi'] : 0,
+        'shift_active'      => $row['shift_active'] ?? '1',
+        'shiftuser_dari'    => $row['shiftuser_dari'] ?? null,
+        'shiftuser_sampai'  => $row['shiftuser_sampai'] ?? null,
+        'shiftuser_active'  => $row['shiftuser_active'] ?? '1',
+        'schedule_date'     => $date,
+        'tanggal_shift'     => $date,
+        'tipe_shift'        => $tipeShift,
+        'is_overnight'      => $isOvernight,
+        'shift_jam_masuk'   => $row['shift_jam_masuk'] ?? null,
+        'shift_jam_pulang'  => $row['shift_jam_pulang'] ?? null,
+        'jam_masuk'         => $jamMasuk,
+        'jam_pulang'        => $jamPulang,
+        'clock_in_target'   => $jamMasuk,
+        'clock_out_target'  => $jamPulang
+    ];
+}
+
+/**
+ * Mengambil record data shift karyawan dari tabel master_shift_user dan master_shift
  */
 function getUserScheduleRecord($pdo, $userId, $date = null)
 {
@@ -508,43 +730,75 @@ function getUserScheduleRecord($pdo, $userId, $date = null)
         $date = date('Y-m-d');
     }
 
-    $tables = ['absensi_schedules', 'absensi_schedule'];
-    foreach ($tables as $tableName) {
-        try {
-            $colStmt = $pdo->query("SHOW COLUMNS FROM `{$tableName}`");
-            $columns = $colStmt->fetchAll(PDO::FETCH_COLUMN);
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                msu.shiftuser_id,
+                msu.user_id,
+                msu.shift_id,
+                msu.shiftuser_dari,
+                msu.shiftuser_sampai,
+                msu.shiftuser_active,
+                msu.shiftuser_createddate,
+                ms.shift_name,
+                ms.shift_jam_masuk,
+                ms.shift_jam_pulang,
+                ms.shift_type,
+                ms.shift_group,
+                ms.shift_team,
+                ms.shift_mulai,
+                ms.shift_toleransi,
+                ms.shift_active
+            FROM master_shift_user msu
+            INNER JOIN master_shift ms ON msu.shift_id = ms.shift_id
+            WHERE msu.user_id = ?
+              AND msu.shiftuser_active = '1'
+              AND ms.shift_active = '1'
+              AND (msu.shiftuser_dari IS NULL OR msu.shiftuser_dari <= ?)
+              AND (msu.shiftuser_sampai IS NULL OR msu.shiftuser_sampai >= ?)
+            ORDER BY msu.shiftuser_dari DESC, msu.shiftuser_createddate DESC, msu.shiftuser_id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$userId, $date, $date]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            $dateCol = null;
-            if (in_array('schedule_date', $columns)) {
-                $dateCol = 'schedule_date';
-            } elseif (in_array('date', $columns)) {
-                $dateCol = 'date';
-            } elseif (in_array('schedule', $columns)) {
-                $dateCol = 'schedule';
-            }
-
-            $userCol = null;
-            if (in_array('user_id', $columns)) {
-                $userCol = 'user_id';
-            } elseif (in_array('id_user', $columns)) {
-                $userCol = 'id_user';
-            }
-
-            if ($dateCol && $userCol) {
-                $stmt = $pdo->prepare("
-                    SELECT * FROM `{$tableName}` 
-                    WHERE `{$userCol}` = ? AND `{$dateCol}` = ? 
-                    LIMIT 1
-                ");
-                $stmt->execute([$userId, $date]);
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                if ($row) {
-                    return $row;
-                }
-            }
-        } catch (PDOException $e) {
-            continue;
+        if (!$row) {
+            $fallbackStmt = $pdo->prepare("
+                SELECT 
+                    msu.shiftuser_id,
+                    msu.user_id,
+                    msu.shift_id,
+                    msu.shiftuser_dari,
+                    msu.shiftuser_sampai,
+                    msu.shiftuser_active,
+                    msu.shiftuser_createddate,
+                    ms.shift_name,
+                    ms.shift_jam_masuk,
+                    ms.shift_jam_pulang,
+                    ms.shift_type,
+                    ms.shift_group,
+                    ms.shift_team,
+                    ms.shift_mulai,
+                    ms.shift_toleransi,
+                    ms.shift_active
+                FROM master_shift_user msu
+                INNER JOIN master_shift ms ON msu.shift_id = ms.shift_id
+                WHERE msu.user_id = ?
+                  AND msu.shiftuser_active = '1'
+                  AND ms.shift_active = '1'
+                  AND (msu.shiftuser_sampai IS NULL OR msu.shiftuser_sampai >= ?)
+                ORDER BY msu.shiftuser_createddate DESC, msu.shiftuser_id DESC
+                LIMIT 1
+            ");
+            $fallbackStmt->execute([$userId, $date]);
+            $row = $fallbackStmt->fetch(PDO::FETCH_ASSOC);
         }
+
+        if ($row) {
+            return normalizeMasterShiftRecord($row, $date);
+        }
+    } catch (PDOException $e) {
+        return null;
     }
 
     return null;
@@ -556,19 +810,22 @@ function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null)
         $date = date('Y-m-d');
     }
 
-    $officeId = null;
-    $scheduleRecord = getUserScheduleRecord($pdo, $userId, $date);
+    $officeId = $fallbackOfficeId;
 
-    if ($scheduleRecord && !empty($scheduleRecord['office_id'])) {
-        $officeId = $scheduleRecord['office_id'];
+    // Jika fallbackOfficeId belum dikirim, ambil dari tabel user
+    if (empty($officeId) && $userId) {
+        try {
+            $uStmt = $pdo->prepare("SELECT office_id FROM user WHERE user_id = ? LIMIT 1");
+            $uStmt->execute([$userId]);
+            $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+            if ($uRow && !empty($uRow['office_id'])) {
+                $officeId = $uRow['office_id'];
+            }
+        } catch (Exception $e) {
+        }
     }
 
-    // 2. Fallback: Jika tidak ada di tabel schedule, gunakan fallbackOfficeId (dari tabel user)
-    if (empty($officeId)) {
-        $officeId = $fallbackOfficeId;
-    }
-
-    // 3. Jika office_id masih kosong/null, otomatis diset ke 2 dan diupdate ke tabel user
+    // Jika office_id masih kosong/null, otomatis diset ke 2 dan diupdate ke tabel user
     if (empty($officeId)) {
         $officeId = 2;
         if ($userId) {
@@ -581,7 +838,7 @@ function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null)
         }
     }
 
-    // 4. Ambil data absensi_offices jika officeId tersedia
+    // Ambil data absensi_offices jika officeId tersedia
     if (!empty($officeId)) {
         $officeStmt = $pdo->prepare("SELECT * FROM absensi_offices WHERE id = ?");
         $officeStmt->execute([$officeId]);
@@ -595,7 +852,7 @@ function getUserOffice($pdo, $userId, $fallbackOfficeId = null, $date = null)
 }
 
 /**
- * Memvalidasi apakah pegawai yang memiliki jadwal di tabel schedule mencoba clock out sebelum waktunya.
+ * Memvalidasi apakah pegawai yang memiliki jadwal di tabel master_shift mencoba clock out sebelum waktunya.
  * Mengembalikan array ['valid' => true] atau ['valid' => false, 'message' => '...']
  */
 function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = null)
@@ -606,33 +863,37 @@ function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = 
 
     $scheduleRecord = getUserScheduleRecord($pdo, $userId, $shiftDate);
 
-    // Jika pegawai TIDAK ada di tabel schedule, diizinkan clock out (fallback)
+    // Jika pegawai TIDAK ada di tabel shift, diizinkan clock out (fallback)
     if (!$scheduleRecord) {
         return ['valid' => true];
     }
 
-    // Cari kolom target jam pulang
-    $clockOutTarget = $scheduleRecord['clock_out_target']
-        ?? $scheduleRecord['clock_out_time']
+    // Cari kolom target jam pulang dari master_shift
+    $clockOutTarget = normalizeShiftTime(
+        $scheduleRecord['clock_out_target']
+        ?? $scheduleRecord['shift_jam_pulang']
         ?? $scheduleRecord['jam_pulang']
-        ?? $scheduleRecord['shift_out']
-        ?? null;
+        ?? null
+    );
 
-    // Jika tidak ada batasan jam pulang di tabel schedule, izinkan
+    // Jika jam pulang masih 00:00:00 / belum diisi di master_shift, izinkan
     if (!$clockOutTarget) {
         return ['valid' => true];
     }
 
     // Cari jam masuk untuk cek shift malam/lintas hari
-    $clockInTarget = $scheduleRecord['clock_in_target']
-        ?? $scheduleRecord['clock_in_time']
+    $clockInTarget = normalizeShiftTime(
+        $scheduleRecord['clock_in_target']
+        ?? $scheduleRecord['shift_jam_masuk']
         ?? $scheduleRecord['jam_masuk']
-        ?? $scheduleRecord['shift_in']
-        ?? null;
+        ?? null
+    );
+
+    $tipeShift = strtolower(trim((string)($scheduleRecord['tipe_shift'] ?? '')));
 
     // Tentukan timestamp target jam pulang
-    if ($clockInTarget && $clockOutTarget < $clockInTarget) {
-        // Shift malam lintas hari (contoh: 18:00 - 08:00 hari berikutnya)
+    if (($tipeShift === 'malam' && $clockInTarget && $clockOutTarget <= $clockInTarget) || ($clockInTarget && $clockOutTarget < $clockInTarget)) {
+        // Shift malam lintas hari (contoh: 19:00 - 07:00 hari berikutnya)
         $targetTimestamp = strtotime("$shiftDate $clockOutTarget +1 day");
     } else {
         $targetTimestamp = strtotime("$shiftDate $clockOutTarget");
@@ -643,7 +904,7 @@ function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = 
         return [
             'valid' => false,
             'target_time' => $clockOutTarget,
-            'message' => "Gagal Clock Out! Belum memasuki jam pulang sesuai jadwal Anda (Jam pulang: {$formattedTarget})."
+            'message' => "Gagal Clock Out! Belum memasuki jam pulang sesuai jadwal shift Anda (Jam pulang: {$formattedTarget})."
         ];
     }
 
@@ -651,7 +912,7 @@ function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = 
 }
 
 /**
- * Memvalidasi apakah pegawai yang memiliki jadwal di tabel schedule mencoba clock in terlalu awal.
+ * Memvalidasi apakah pegawai yang memiliki jadwal di tabel master_shift mencoba clock in terlalu awal.
  * Batas toleransi paling awal adalah 30 menit sebelum jam masuk.
  * Mengembalikan array ['valid' => true] atau ['valid' => false, 'message' => '...']
  */
@@ -663,19 +924,20 @@ function validateScheduleClockInTime($pdo, $userId, $shiftDate, $currentTime = n
 
     $scheduleRecord = getUserScheduleRecord($pdo, $userId, $shiftDate);
 
-    // Jika pegawai TIDAK ada di tabel schedule, diizinkan clock in kapan saja (bebas)
+    // Jika pegawai TIDAK ada di tabel shift, diizinkan clock in kapan saja (bebas)
     if (!$scheduleRecord) {
         return ['valid' => true];
     }
 
-    // Cari kolom target jam masuk
-    $clockInTarget = $scheduleRecord['clock_in_target']
-        ?? $scheduleRecord['clock_in_time']
+    // Cari kolom target jam masuk dari master_shift
+    $clockInTarget = normalizeShiftTime(
+        $scheduleRecord['clock_in_target']
+        ?? $scheduleRecord['shift_jam_masuk']
         ?? $scheduleRecord['jam_masuk']
-        ?? $scheduleRecord['shift_in']
-        ?? null;
+        ?? null
+    );
 
-    // Jika tidak ada batasan jam masuk di tabel schedule, izinkan
+    // Jika jam masuk masih 00:00:00 / belum diisi di master_shift, izinkan
     if (!$clockInTarget) {
         return ['valid' => true];
     }
@@ -741,35 +1003,45 @@ function getActiveAttendance($pdo, $userId, $currentTime = null)
     }
 
     // Jika sesi absensi berasal dari HARI SEBELUMNYA ($shiftDate < $today):
-    // Cek apakah ini shift malam / lintas hari yang valid.
+    // Cek apakah ini shift malam / lintas hari yang valid dari master_shift.
     $scheduleRecord = getUserScheduleRecord($pdo, $userId, $shiftDate);
     
     $isNightShift = false;
     $maxAllowedClockOutTs = null;
 
     if ($scheduleRecord) {
-        $clockInTarget = $scheduleRecord['clock_in_target'] 
-            ?? $scheduleRecord['clock_in_time'] 
-            ?? $scheduleRecord['jam_masuk'] 
-            ?? $scheduleRecord['shift_in'] 
-            ?? null;
+        $clockInTarget = normalizeShiftTime(
+            $scheduleRecord['clock_in_target']
+            ?? $scheduleRecord['shift_jam_masuk']
+            ?? $scheduleRecord['jam_masuk']
+            ?? null
+        );
 
-        $clockOutTarget = $scheduleRecord['clock_out_target'] 
-            ?? $scheduleRecord['clock_out_time'] 
-            ?? $scheduleRecord['jam_pulang'] 
-            ?? $scheduleRecord['shift_out'] 
-            ?? null;
+        $clockOutTarget = normalizeShiftTime(
+            $scheduleRecord['clock_out_target']
+            ?? $scheduleRecord['shift_jam_pulang']
+            ?? $scheduleRecord['jam_pulang']
+            ?? null
+        );
 
-        if ($clockInTarget && $clockOutTarget && $clockOutTarget < $clockInTarget) {
-            // Shift malam lintas hari (contoh: 22:00 -> 06:00 hari berikutnya)
+        $tipeShift = strtolower(trim((string)($scheduleRecord['tipe_shift'] ?? '')));
+
+        if ($tipeShift === 'malam' || ($clockInTarget && $clockOutTarget && $clockOutTarget < $clockInTarget)) {
+            // Shift malam lintas hari (contoh: 19:00 -> 07:00 atau 22:00 -> 06:00 hari berikutnya)
             $isNightShift = true;
-            // Toleransi jam pulang shift malam hingga 4 jam setelah jam target pulang
-            $targetClockOutTs = strtotime("$shiftDate $clockOutTarget +1 day");
-            $maxAllowedClockOutTs = $targetClockOutTs + (4 * 3600);
+            if ($clockOutTarget) {
+                $targetClockOutTs = ($clockInTarget && $clockOutTarget <= $clockInTarget)
+                    ? strtotime("$shiftDate $clockOutTarget +1 day")
+                    : strtotime("$shiftDate $clockOutTarget");
+                // Toleransi jam pulang shift malam hingga 4 jam setelah jam target pulang
+                $maxAllowedClockOutTs = $targetClockOutTs + (4 * 3600);
+            } else {
+                $maxAllowedClockOutTs = $clockInTs + (20 * 3600);
+            }
         }
     }
 
-    // Jika tidak ada jadwal shift malam bertuliskan lintas hari, cek berdasarkan jam clock in
+    // Jika tidak ada jadwal shift malam bertuliskan lintas hari (atau jam di master_shift masih 00:00:00), cek berdasarkan jam clock in
     if (!$isNightShift) {
         $clockInHour = (int)date('H', $clockInTs);
         // Jika clock in dilakukan malam hari (jam 18:00 ke atas) dan durasi belum 16 jam

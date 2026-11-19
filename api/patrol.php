@@ -8,69 +8,112 @@ $user = authenticate($pdo);
 $input = json_decode(file_get_contents("php://input"), true);
 validateRequestDevice($pdo, $user, $input, false);
 
-if (!isset($input['latitude']) || !isset($input['longitude'])) {
-    sendResponse(400, 'Koordinat wajib dikirim');
+if (!is_numeric($input['latitude']) || !is_numeric($input['longitude'])) {
+    sendResponse(400, 'Koordinat wajib dikirim dalam format angka yang valid');
 }
 
-$userLat = $input['latitude'];
-$userLng = $input['longitude'];
+$userLat = (float)$input['latitude'];
+$userLng = (float)$input['longitude'];
 $today   = date('Y-m-d');
+$yesterday = date('Y-m-d', strtotime('-1 day'));
 $now     = date('Y-m-d H:i:s');
-$currentTime = date('H:i:s');
+$nowTs   = strtotime($now);
 
-if ($user['user_jabatan'] !== 'Petugas Keamanan') {
-    sendResponse(403, 'Fitur ini hanya untuk Security');
+if (!isSecurityUser($user)) {
+    sendResponse(403, 'Fitur absen tiap jam (patroli) hanya berlaku untuk Petugas Keamanan');
 }
 
-$shiftStmt = $pdo->prepare("
-    SELECT jam_masuk, jam_pulang 
-    FROM absensi_pegawai_patroli 
-    WHERE user_id = ? AND tanggal_shift = ?
-");
-$shiftStmt->execute([$user['user_id'], $today]);
-$shiftsHariIni = $shiftStmt->fetchAll(PDO::FETCH_ASSOC);
-
-if (!$shiftsHariIni) {
-    sendResponse(400, 'Anda tidak memiliki jadwal shift patroli pada hari ini.');
-}
-
-$isWithinShift = false;
-
-foreach ($shiftsHariIni as $shift) {
-    $jamMasuk  = $shift['jam_masuk'];
-    $jamPulang = $shift['jam_pulang'];
-
-    // Toleransi 30 menit sebelum dan sesudah shift agar absen tidak gagal karena beda menit
-    $batasBuka  = date('H:i:s', strtotime($jamMasuk . ' -30 minutes'));
-    $batasTutup = date('H:i:s', strtotime($jamPulang . ' +30 minutes'));
-
-    if ($currentTime >= $batasBuka && $currentTime <= $batasTutup) {
-        $isWithinShift = true;
-        break; 
-    }
-}
-
-if (!$isWithinShift) {
-    sendResponse(400, "Gagal Lapor! Saat ini Anda berada di luar jam shift patroli Anda.");
-}
-
-$office = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $today);
-
-if (!$office || empty($office['polygon_coordinates']) || !isPointInPolygon($userLat, $userLng, $office['polygon_coordinates'])) {
-    sendResponse(400, "Gagal Lapor! Posisi Anda di luar area patroli kantor.");
-}
-
-
-$attStmt = $pdo->prepare("SELECT id, clock_out_time FROM absensi_attendances WHERE user_id = ? AND is_confirmed = 1 AND date = ? ORDER BY id DESC LIMIT 1");
-$attStmt->execute([$user['user_id'], $today]);
-$attendance = $attStmt->fetch();
+// 1. Verifikasi Absensi Aktif Petugas Keamanan
+$attendance = getActiveAttendance($pdo, $user['user_id'], $now);
 
 if (!$attendance) {
     sendResponse(400, 'Anda belum melakukan Clock In (Absen Masuk). Silakan Absen Masuk dulu di menu utama.');
 }
 
-if (!is_null($attendance['clock_out_time']) && $attendance['clock_out_time'] !== '') {
+if (!empty($attendance['clock_out_time'])) {
     sendResponse(400, 'Anda sudah Clock Out (Pulang). Tidak bisa mengirim laporan patroli lagi.');
+}
+
+$activeShiftDate = $attendance['date'];
+
+// 2. Ambil dan Cocokkan Jadwal Shift Keamanan dari master_shift_user & master_shift
+$candidateDates = array_values(array_unique([$activeShiftDate, $today]));
+$shifts = [];
+
+foreach ($candidateDates as $cDate) {
+    $sRec = getUserScheduleRecord($pdo, $user['user_id'], $cDate);
+    if ($sRec) {
+        $shifts[] = $sRec;
+    }
+}
+
+$isWithinShift = false;
+$matchedShift = null;
+$hasDefinedShiftHours = false;
+
+foreach ($shifts as $shift) {
+    $shiftDate = $shift['schedule_date'] ?? $activeShiftDate;
+    $tipeShift = strtolower(trim((string)($shift['tipe_shift'] ?? '')));
+    $jamMasuk  = $shift['clock_in_target'] ?? null;
+    $jamPulang = $shift['clock_out_target'] ?? null;
+
+    // Jika jam_masuk atau jam_pulang di master_shift masih 00:00:00 (belum diisi), lewati ke fallback
+    if (!$jamMasuk || !$jamPulang) {
+        continue;
+    }
+
+    $hasDefinedShiftHours = true;
+    $startTs = strtotime("$shiftDate $jamMasuk");
+    $endTs   = strtotime("$shiftDate $jamPulang");
+
+    // Shift malam lintas hari (contoh: 19:00 -> 07:00 keesokan harinya)
+    if ($tipeShift === 'malam' || !empty($shift['is_overnight']) || $endTs <= $startTs) {
+        $endTs = strtotime("$shiftDate $jamPulang +1 day");
+    }
+
+    // Toleransi 30 menit sebelum jam masuk shift, dan ditutup tepat saat jam pulang shift berakhir
+    $batasBukaTs  = $startTs - (30 * 60);
+    $batasTutupTs = $endTs;
+
+    if ($nowTs >= $batasBukaTs && $nowTs <= $batasTutupTs) {
+        $isWithinShift = true;
+        $matchedShift = $shift;
+        $activeShiftDate = $shiftDate;
+        break;
+    }
+}
+
+if (!$hasDefinedShiftHours) {
+    // Jika jam pada master_shift masih kosong/00:00:00 (rumus rotasi belum diisi), tentukan berdasarkan waktu Clock In
+    $clockInTs = strtotime($attendance['clock_in_time']);
+    $clockInHour = (int)date('H', $clockInTs);
+    
+    // Shift Malam: Clock In antara 18:00 s/d 06:59
+    if ($clockInHour >= 18 || $clockInHour < 7) {
+        $startTs = strtotime("$activeShiftDate 19:00:00");
+        $endTs   = strtotime("$activeShiftDate 07:00:00 +1 day");
+    } else {
+        // Shift Pagi: 07:00 s/d 19:00
+        $startTs = strtotime("$activeShiftDate 07:00:00");
+        $endTs   = strtotime("$activeShiftDate 19:00:00");
+    }
+
+    $batasBukaTs  = $startTs - (30 * 60);
+    $batasTutupTs = $endTs;
+
+    if ($nowTs >= $batasBukaTs && $nowTs <= $batasTutupTs) {
+        $isWithinShift = true;
+    }
+}
+
+if (!$isWithinShift) {
+    sendResponse(400, "Gagal Lapor! Saat ini Anda berada di luar jam shift dinas keamanan Anda.");
+}
+
+$office = getUserOffice($pdo, $user['user_id'], $user['office_id'] ?? null, $activeShiftDate);
+
+if (!$office || !isPointWithinGeofence($userLat, $userLng, $office, 25.0)) {
+    sendResponse(400, "Gagal Lapor! Posisi Anda di luar area patroli kantor.");
 }
 
 
