@@ -24,7 +24,7 @@ if (!isSecurityUser($user)) {
 }
 
 // 1. Verifikasi Absensi Aktif Petugas Keamanan
-$attendance = getActiveAttendance($pdo, $user['user_id'], $now);
+$attendance = getActiveAttendance($pdo, $user['user_id'], $now, $user);
 
 if (!$attendance) {
     sendResponse(400, 'Anda belum melakukan Clock In (Absen Masuk). Silakan Absen Masuk dulu di menu utama.');

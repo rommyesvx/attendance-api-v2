@@ -7,7 +7,7 @@ $today = date('Y-m-d');
 
 try {
     // Cek dulu apakah ada sesi yang masih clocked_in (termasuk shift malam kemarin)
-    $activeAtt = getActiveAttendance($pdo, $user['user_id']);
+    $activeAtt = getActiveAttendance($pdo, $user['user_id'], null, $user);
 
     $statusAbsen = 'not_clocked_in';
     $jamMasuk = null;
@@ -95,11 +95,18 @@ try {
     $formattedIn  = $rawClockIn ? $formatTime($rawClockIn, '--:--') : ($hasSchedule ? '--:--' : ($isSecurity ? '--:--' : '07:30'));
     $formattedOut = $rawClockOut ? $formatTime($rawClockOut, '--:--') : ($hasSchedule ? '--:--' : ($isSecurity ? '--:--' : '16:00'));
 
-    $isOvernight = !empty($scheduleRecord['is_overnight']) || ($tipeShift === 'malam');
-    $endDate     = $activeShiftDate;
+    $isActiveOvernightSession = ($activeAtt && $activeShiftDate < $today);
+    $isOvernight = !empty($scheduleRecord['is_overnight']) || ($tipeShift === 'malam') || $isActiveOvernightSession;
+    if ($isActiveOvernightSession && !$tipeShift) {
+        $tipeShift = 'malam';
+    }
+    $endDate     = $isOvernight ? date('Y-m-d', strtotime("$activeShiftDate +1 day")) : $activeShiftDate;
     $shiftStatus = 'no_shift';
 
-    if ($hasSchedule && $rawClockIn && $rawClockOut) {
+    if ($isActiveOvernightSession) {
+        // Sesi shift malam dari kemarin masih aktif dan menunggu Clock Out hari ini
+        $shiftStatus = 'ongoing';
+    } elseif ($hasSchedule && $rawClockIn && $rawClockOut) {
         $startTs = strtotime("$activeShiftDate $rawClockIn");
         if ($isOvernight) {
             $endDate = date('Y-m-d', strtotime("$activeShiftDate +1 day"));

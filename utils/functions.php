@@ -630,6 +630,19 @@ function authenticate($pdo, $checkDevice = true)
 }
 
 /**
+ * Mengecek apakah user memiliki jabatan Petugas Keamanan (tanpa batasan mode pilot).
+ * Digunakan untuk aturan operasional absensi seperti shift malam lintas hari.
+ */
+function isSecurityRole($user)
+{
+    if (!is_array($user)) {
+        return false;
+    }
+    $jabatan = trim((string)($user['user_jabatan'] ?? ''));
+    return strcasecmp($jabatan, 'Petugas Keamanan') === 0;
+}
+
+/**
  * Mengecek apakah user memiliki jabatan Petugas Keamanan.
  * Fitur absen tiap jam (patroli) hanya berlaku untuk Petugas Keamanan.
  */
@@ -642,8 +655,7 @@ function isSecurityUser($user)
     if (!isPilotTestUser($user)) {
         return false;
     }
-    $jabatan = trim((string)($user['user_jabatan'] ?? ''));
-    return strcasecmp($jabatan, 'Petugas Keamanan') === 0;
+    return isSecurityRole($user);
 }
 
 /**
@@ -890,16 +902,23 @@ function validateScheduleClockOutTime($pdo, $userId, $shiftDate, $currentTime = 
     );
 
     $tipeShift = strtolower(trim((string)($scheduleRecord['tipe_shift'] ?? '')));
+    $isOvernightSchedule = ($tipeShift === 'malam' || !empty($scheduleRecord['is_overnight']));
+    $clockOutTsSameDay = strtotime("$shiftDate $clockOutTarget");
+    $clockInTsSameDay = $clockInTarget ? strtotime("$shiftDate $clockInTarget") : false;
+
+    if ($clockInTsSameDay !== false && $clockOutTsSameDay !== false && $clockOutTsSameDay <= $clockInTsSameDay) {
+        $isOvernightSchedule = true;
+    }
 
     // Tentukan timestamp target jam pulang
-    if (($tipeShift === 'malam' && $clockInTarget && $clockOutTarget <= $clockInTarget) || ($clockInTarget && $clockOutTarget < $clockInTarget)) {
+    if ($isOvernightSchedule && ($clockInTsSameDay === false || $clockOutTsSameDay <= $clockInTsSameDay)) {
         // Shift malam lintas hari (contoh: 19:00 - 07:00 hari berikutnya)
         $targetTimestamp = strtotime("$shiftDate $clockOutTarget +1 day");
     } else {
-        $targetTimestamp = strtotime("$shiftDate $clockOutTarget");
+        $targetTimestamp = $clockOutTsSameDay;
     }
 
-    if (strtotime($currentTime) < $targetTimestamp) {
+    if ($targetTimestamp !== false && strtotime($currentTime) < $targetTimestamp) {
         $formattedTarget = date('H:i', strtotime($clockOutTarget));
         return [
             'valid' => false,
@@ -963,10 +982,127 @@ function validateScheduleClockInTime($pdo, $userId, $shiftDate, $currentTime = n
 }
 
 /**
+ * Mem-parse nilai waktu absensi (DATETIME atau TIME) menjadi Unix timestamp secara aman.
+ */
+function parseAttendanceTimestamp($timeStr, $fallbackDate = null)
+{
+    $raw = trim((string)$timeStr);
+    if ($raw === '') {
+        return false;
+    }
+    if (strpos($raw, ' ') === false && strpos($raw, '-') === false && $fallbackDate) {
+        $raw = $fallbackDate . ' ' . $raw;
+    }
+    return strtotime($raw);
+}
+
+/**
+ * Mengevaluasi apakah record absensi dari hari sebelumnya masih termasuk sesi shift malam
+ * lintas hari yang valid pada waktu saat ini ($nowTs).
+ */
+function isValidOvernightAttendance($pdo, $userId, array $attendance, $nowTs, $user = null)
+{
+    $shiftDate = $attendance['date'] ?? null;
+    if (!$shiftDate) {
+        return false;
+    }
+
+    $clockInTs = parseAttendanceTimestamp($attendance['clock_in_time'] ?? '', $shiftDate);
+    if ($clockInTs === false) {
+        return false;
+    }
+
+    $hoursElapsed = ($nowTs - $clockInTs) / 3600;
+    if ($hoursElapsed < 0 || $hoursElapsed > 24) {
+        return false;
+    }
+
+    $scheduleRecord = getUserScheduleRecord($pdo, $userId, $shiftDate);
+    $isNightShift = false;
+    $maxAllowedClockOutTs = null;
+    $isRotatingSecurityShift = false;
+
+    if ($scheduleRecord) {
+        $clockInTarget = normalizeShiftTime(
+            $scheduleRecord['clock_in_target']
+            ?? $scheduleRecord['shift_jam_masuk']
+            ?? $scheduleRecord['jam_masuk']
+            ?? null
+        );
+
+        $clockOutTarget = normalizeShiftTime(
+            $scheduleRecord['clock_out_target']
+            ?? $scheduleRecord['shift_jam_pulang']
+            ?? $scheduleRecord['jam_pulang']
+            ?? null
+        );
+
+        $tipeShift = strtolower(trim((string)($scheduleRecord['tipe_shift'] ?? '')));
+        $shiftType = (string)($scheduleRecord['shift_type'] ?? '');
+        $isRotatingSecurityShift = in_array($shiftType, ['2', '3'], true);
+
+        $clockInTargetTs = $clockInTarget ? strtotime("$shiftDate $clockInTarget") : false;
+        $clockOutTargetTs = $clockOutTarget ? strtotime("$shiftDate $clockOutTarget") : false;
+
+        $isOvernightSchedule = (
+            $tipeShift === 'malam'
+            || !empty($scheduleRecord['is_overnight'])
+            || ($clockInTargetTs !== false && $clockOutTargetTs !== false && $clockOutTargetTs <= $clockInTargetTs)
+        );
+
+        if ($isOvernightSchedule) {
+            // Shift malam lintas hari (contoh: 19:00 -> 07:00 atau 22:00 -> 06:00 hari berikutnya)
+            $isNightShift = true;
+            if ($clockOutTarget) {
+                $targetClockOutTs = ($clockInTargetTs === false || $clockOutTargetTs <= $clockInTargetTs)
+                    ? strtotime("$shiftDate $clockOutTarget +1 day")
+                    : $clockOutTargetTs;
+                // Toleransi jam pulang shift malam hingga 6 jam setelah jam target pulang
+                $maxAllowedClockOutTs = $targetClockOutTs + (6 * 3600);
+            } else {
+                $maxAllowedClockOutTs = $clockInTs + (20 * 3600);
+            }
+        }
+    }
+
+    // Jika tidak ada jadwal shift malam eksplisit (misal shift_type 2 & 3 dengan jam 00:00:00,
+    // atau petugas keamanan yang mengambil shift malam di luar jam default)
+    if (!$isNightShift) {
+        $isSecurity = isSecurityRole($user) || $isRotatingSecurityShift;
+        if (!$isSecurity && $user === null) {
+            try {
+                $uStmt = $pdo->prepare("SELECT user_jabatan FROM user WHERE user_id = ? LIMIT 1");
+                $uStmt->execute([$userId]);
+                $uRow = $uStmt->fetch(PDO::FETCH_ASSOC);
+                if ($uRow) {
+                    $isSecurity = isSecurityRole($uRow);
+                }
+            } catch (Exception $e) {
+            }
+        }
+
+        $clockInHour = (int)date('H', $clockInTs);
+        if ($isSecurity) {
+            // Petugas keamanan shift malam (19:00 -> 07:00, toleransi masuk lebih awal mulai 17:00 & lembur hingga 20 jam)
+            if ($clockInHour >= 17 && $hoursElapsed <= 20) {
+                $isNightShift = true;
+                $maxAllowedClockOutTs = $clockInTs + (20 * 3600);
+            }
+        } elseif ($clockInHour >= 18 && $hoursElapsed <= 16) {
+            // Pegawai non-keamanan: jika clock in malam hari (jam 18:00 ke atas) dan durasi belum 16 jam
+            $isNightShift = true;
+            $maxAllowedClockOutTs = $clockInTs + (16 * 3600);
+        }
+    }
+
+    return ($isNightShift && $maxAllowedClockOutTs && $nowTs <= $maxAllowedClockOutTs);
+}
+
+/**
  * Mengambil sesi absensi aktif yang BELUM Clock Out dan MASIH VALID untuk di-Clock Out.
  * Mengabaikan sesi dari hari sebelumnya jika pegawai lupa Clock Out (kecuali shift malam lintas hari).
  */
-function getActiveAttendance($pdo, $userId, $currentTime = null)
+function getActiveAttendance($pdo, $userId, $currentTime = null, $user = null)
 {
     if (!$currentTime) {
         $currentTime = date('Y-m-d H:i:s');
@@ -986,8 +1122,12 @@ function getActiveAttendance($pdo, $userId, $currentTime = null)
         return null;
     }
 
-    $clockInTimeStr = $activeAttendance['clock_in_time'];
-    $clockInTs = strtotime($clockInTimeStr);
+    $shiftDate = $activeAttendance['date'];
+    $clockInTs = parseAttendanceTimestamp($activeAttendance['clock_in_time'] ?? '', $shiftDate);
+    if ($clockInTs === false) {
+        return null;
+    }
+
     $hoursElapsed = ($nowTs - $clockInTs) / 3600;
 
     // Batas maksimal mutlak 24 jam
@@ -995,69 +1135,50 @@ function getActiveAttendance($pdo, $userId, $currentTime = null)
         return null;
     }
 
-    $shiftDate = $activeAttendance['date'];
-
     // Jika sesi absensi adalah HARI INI, maka sesi tersebut pasti aktif
     if ($shiftDate === $today) {
         return $activeAttendance;
     }
 
     // Jika sesi absensi berasal dari HARI SEBELUMNYA ($shiftDate < $today):
-    // Cek apakah ini shift malam / lintas hari yang valid dari master_shift.
-    $scheduleRecord = getUserScheduleRecord($pdo, $userId, $shiftDate);
-    
-    $isNightShift = false;
-    $maxAllowedClockOutTs = null;
-
-    if ($scheduleRecord) {
-        $clockInTarget = normalizeShiftTime(
-            $scheduleRecord['clock_in_target']
-            ?? $scheduleRecord['shift_jam_masuk']
-            ?? $scheduleRecord['jam_masuk']
-            ?? null
-        );
-
-        $clockOutTarget = normalizeShiftTime(
-            $scheduleRecord['clock_out_target']
-            ?? $scheduleRecord['shift_jam_pulang']
-            ?? $scheduleRecord['jam_pulang']
-            ?? null
-        );
-
-        $tipeShift = strtolower(trim((string)($scheduleRecord['tipe_shift'] ?? '')));
-
-        if ($tipeShift === 'malam' || ($clockInTarget && $clockOutTarget && $clockOutTarget < $clockInTarget)) {
-            // Shift malam lintas hari (contoh: 19:00 -> 07:00 atau 22:00 -> 06:00 hari berikutnya)
-            $isNightShift = true;
-            if ($clockOutTarget) {
-                $targetClockOutTs = ($clockInTarget && $clockOutTarget <= $clockInTarget)
-                    ? strtotime("$shiftDate $clockOutTarget +1 day")
-                    : strtotime("$shiftDate $clockOutTarget");
-                // Toleransi jam pulang shift malam hingga 4 jam setelah jam target pulang
-                $maxAllowedClockOutTs = $targetClockOutTs + (4 * 3600);
-            } else {
-                $maxAllowedClockOutTs = $clockInTs + (20 * 3600);
-            }
-        }
-    }
-
-    // Jika tidak ada jadwal shift malam bertuliskan lintas hari (atau jam di master_shift masih 00:00:00), cek berdasarkan jam clock in
-    if (!$isNightShift) {
-        $clockInHour = (int)date('H', $clockInTs);
-        // Jika clock in dilakukan malam hari (jam 18:00 ke atas) dan durasi belum 16 jam
-        if ($clockInHour >= 18 && $hoursElapsed <= 16) {
-            $isNightShift = true;
-            $maxAllowedClockOutTs = $clockInTs + (16 * 3600);
-        }
-    }
-
-    // Jika merupakan shift malam dan waktu sekarang masih dalam batas toleransi clock out
-    if ($isNightShift && $maxAllowedClockOutTs && $nowTs <= $maxAllowedClockOutTs) {
+    // Validasi apakah ini shift malam lintas hari (misal 19:00 tgl 25 -> 07:00 tgl 26)
+    if (isValidOvernightAttendance($pdo, $userId, $activeAttendance, $nowTs, $user)) {
         return $activeAttendance;
     }
 
     // Selain kondisi di atas (misalnya clock in pagi/siang kemarin dan lupa clock out),
     // sesi dianggap sudah berakhir / kedaluwarsa.
+    return null;
+}
+
+/**
+ * Mengambil sesi absensi shift malam kemarin yang sudah sempat Clock Out hari ini,
+ * agar pembaruan jam pulang (re-clock-out) pada endpoint clock-out tetap dapat dilakukan.
+ */
+function getRecentOvernightAttendance($pdo, $userId, $currentTime = null, $user = null)
+{
+    if (!$currentTime) {
+        $currentTime = date('Y-m-d H:i:s');
+    }
+    $nowTs = strtotime($currentTime);
+    $yesterday = date('Y-m-d', strtotime(date('Y-m-d', $nowTs) . ' -1 day'));
+
+    $stmt = $pdo->prepare("
+        SELECT * FROM absensi_attendances
+        WHERE user_id = ? AND is_confirmed = 1 AND date = ?
+        ORDER BY id DESC LIMIT 1
+    ");
+    $stmt->execute([$userId, $yesterday]);
+    $yesterdayAtt = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$yesterdayAtt) {
+        return null;
+    }
+
+    if (isValidOvernightAttendance($pdo, $userId, $yesterdayAtt, $nowTs, $user)) {
+        return $yesterdayAtt;
+    }
+
     return null;
 }
 ?>

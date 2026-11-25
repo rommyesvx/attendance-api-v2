@@ -17,18 +17,20 @@ $userLng = $input['longitude'];
 $today = date('Y-m-d');
 $currentTime = date('Y-m-d H:i:s');
 
-$stmt_holiday = $pdo->prepare("SELECT name FROM absensi_holidays WHERE date = ?");
-$stmt_holiday->execute([$today]);
-$holiday = $stmt_holiday->fetch(PDO::FETCH_ASSOC);
+// Cari sesi absensi aktif yang BELUM Clock Out dan masih valid (termasuk shift malam kemarin)
+$attendance = getActiveAttendance($pdo, $user['user_id'], $currentTime, $user);
 
-if ($holiday) {
-    sendResponse(400, "Gagal Clock In! Hari ini libur: " . $holiday['name']);
-    exit;
+// Validasi hari libur hanya berlaku untuk Clock In baru pegawai non-keamanan (tidak memblokir Clock Out shift malam)
+if (!$attendance && !isSecurityRole($user)) {
+    $stmt_holiday = $pdo->prepare("SELECT name FROM absensi_holidays WHERE date = ?");
+    $stmt_holiday->execute([$today]);
+    $holiday = $stmt_holiday->fetch(PDO::FETCH_ASSOC);
+
+    if ($holiday) {
+        sendResponse(400, "Gagal Clock In! Hari ini libur: " . $holiday['name']);
+        exit;
+    }
 }
-
-// Cari sesi absensi aktif yang BELUM Clock Out dan masih valid
-$attendance = getActiveAttendance($pdo, $user['user_id'], $currentTime);
-
 
 // Jika tidak ada sesi yang belum clock out, cek apakah hari ini sudah ada data absensi (sudah Clock In & Clock Out)
 if (!$attendance) {
@@ -44,7 +46,7 @@ if (!$attendance) {
         // Cek apakah pegawai ini memiliki jadwal untuk hari ini
         $hasSchedule = getUserScheduleRecord($pdo, $user['user_id'], $today);
 
-        if (isSecurityUser($user) && $hasSchedule && !empty($todayAttendance['clock_out_time'])) {
+        if (isSecurityRole($user) && $hasSchedule && !empty($todayAttendance['clock_out_time'])) {
             // Petugas keamanan terjadwal yang absen shift lagi di hari yang sama -> buat baris baru
         } else {
             // Pegawai reguler atau sesi belum clock out -> update baris ini

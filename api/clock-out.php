@@ -18,9 +18,8 @@ $today   = date('Y-m-d');
 $now     = date('Y-m-d H:i:s');
 
 try {
-    // Cari sesi absensi aktif yang BELUM Clock Out dan masih valid
-    $attendance = getActiveAttendance($pdo, $user['user_id'], $now);
-
+    // Cari sesi absensi aktif yang BELUM Clock Out dan masih valid (termasuk shift malam kemarin)
+    $attendance = getActiveAttendance($pdo, $user['user_id'], $now, $user);
 
     // Jika tidak ada sesi yang belum clock out, cek apakah hari ini sudah ada data absensi untuk memperbarui jam pulang (meniban clock out)
     if (!$attendance) {
@@ -34,6 +33,9 @@ try {
         $todayAttendance = $todayStmt->fetch();
         if ($todayAttendance) {
             $attendance = $todayAttendance;
+        } else {
+            // Cek sesi shift malam kemarin yang masih dalam rentang pembaruan clock out
+            $attendance = getRecentOvernightAttendance($pdo, $user['user_id'], $now, $user);
         }
     }
 
